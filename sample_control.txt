@@ -1,0 +1,41 @@
+[BASIC]
+DEM = data/dem.tif
+DDM = data/ddm.tif
+FAM = data/fam.tif
+Projection = EPSG:4326
+
+[LAKE Reservoir1]
+Lat = 35.5
+Lon = -97.8
+Area = 100000         ; user-defined, in m²
+VolumeMax = 500000    ; user-defined, in m³
+VolumeInitial = 300000
+
+[LAKEINLET Reservoir1]
+Lat = 35.55
+Lon = -97.85
+
+[LAKEINLET Reservoir1]
+Lat = 35.60
+Lon = -97.90
+
+[BASIN]
+Name = RedRiver
+Lake = Reservoir1
+Gauge = Gauge1
+DamQ = data/engineered_discharge.csv
+
+[TASK]
+Name = SimulationWithLake
+Model = CREST
+Basin = RedRiver
+Gauge = Gauge1
+StartDate = 2024-01-01
+EndDate = 2024-12-31
+LakeModule = true
+
+# Example engineered_discharge.csv:
+# time,Reservoir1
+# 20240101-000000,100.0
+# 20240101-010000,110.0
+# 20240101-020000,120.0 

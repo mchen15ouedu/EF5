@@ -1,0 +1,34 @@
+[BASIC]
+DEM = data/dem.tif
+DDM = data/ddm.tif
+FAM = data/fam.tif
+Projection = EPSG:4326
+
+[BASIN]
+Name = RedRiver
+LakeListFile = data/lakes.csv
+DamQ = data/engineered_discharge.csv
+Gauge = Gauge1
+
+[TASK]
+Name = SimulationWithLake
+Model = CREST
+Basin = RedRiver
+Gauge = Gauge1
+StartDate = 2024-01-01
+EndDate = 2024-12-31
+LakeModule = true
+
+# Example lakes.csv:
+# name,lat,lon,area,volumeMax,volumeInitial
+# LakeA,35.1,-97.2,100000,500000,300000
+# LakeB,36.2,-98.3,120000,600000,400000
+# Reservoir1,35.5,-97.8,150000,700000,500000
+
+# Example engineered_discharge.csv:
+# time,Reservoir1
+# 20240101-000000,100.0
+# 20240101-010000,110.0
+# 20240101-020000,120.0
+
+# Note: The lake output CSV files will use the names from the 'name' column in lakes.csv, e.g., ts.LakeA.lake.csv, ts.Reservoir1.lake.csv, etc. 
