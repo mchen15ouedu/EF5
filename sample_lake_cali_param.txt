@@ -1,0 +1,17 @@
+# Lake Calibration Parameter Set Example
+# This file defines lake parameters for calibration using DREAM
+
+LAKE_CALI_PARAM "lake_cali_example"
+
+# Gauge for calibration
+gauge "sample_gauge"
+
+# Lake parameters for calibration
+# Format: parameter_name=min_value,max_value,initial_value
+# 
+# klake: Linear reservoir retention constant K (hours)
+# - Controls dry season outflow decay rate
+# - Small values (6-12 hours): Fast decay, quick response to dry conditions  
+# - Medium values (24-48 hours): Moderate decay, typical for many lakes
+# - Large values (72+ hours): Slow decay, lakes maintain outflow longer
+klake=6.0,72.0,24.0 

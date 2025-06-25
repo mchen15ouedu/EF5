@@ -188,10 +188,14 @@ void ExecuteCalibrationDREAM(TaskConfigSection *task) {
   if (task->GetSnow() != SNOW_QTY) {
     numSnow = numSnowParams[task->GetSnow()];
   }
+  int numLake = 0;
+  if (task->GetLakeCaliParamSec() != NULL) {
+    numLake = task->GetLakeCaliParamSec()->GetNumParams();
+  }
   dream.Initialize(task->GetCaliParamSec(), task->GetRoutingCaliParamSec(),
-                   task->GetSnowCaliParamSec(),
+                   task->GetSnowCaliParamSec(), task->GetLakeCaliParamSec(),
                    numModelParams[task->GetModel()],
-                   numRouteParams[task->GetRouting()], numSnow, &sim);
+                   numRouteParams[task->GetRouting()], numSnow, numLake, &sim);
   dream.CalibrateParams();
 
   sprintf(buffer, "%s/cali_dream.%s.%s.csv", task->GetOutput(),

@@ -1,0 +1,80 @@
+# Sample EF5 Control File with Lake Outflow Integration
+# This example shows how to configure lakes with KW routing
+# Lakes use storage-based overflow (storage > th_volume) for natural outflow
+
+# Basic task configuration
+TASK "lake_example"
+STYLE CALI_DREAM
+MODEL HP
+ROUTING KW
+OUTPUT "./output"
+TIMESTEP 1H
+TIME_BEGIN 20200101_00
+TIME_END 20200131_23
+TIME_WARMEND 20200107_23
+
+# Basin and forcing data
+BASIN "sample_basin"
+PRECIP "sample_precip"
+PET "sample_pet"
+
+# Parameter sets
+PARAM_SET "sample_params"
+ROUTING_PARAM_SET "sample_routing_params"
+
+# Calibration parameter sets
+CALI_PARAM "sample_cali_params"
+ROUTING_CALI_PARAM "sample_routing_cali_params"
+LAKE_CALI_PARAM "lake_cali_example"
+
+# Lake configuration
+# LAKEMODULE true - enables storage-based lake outflow
+# LAKEOUTFLOWFILE - optional engineered discharge file
+LAKEMODULE true
+LAKEOUTFLOWFILE "engineered_discharge.csv"
+
+# Output configuration
+OUTPUT_GRIDS "Q|SM|GW|PRECIP|PET"
+
+# Basin configuration
+BASIN "sample_basin"
+DEM "dem.tif"
+FLOWDIR "flowdir.tif"
+FLOWACC "flowacc.tif"
+GAUGES "gauges.csv"
+
+# Precipitation configuration
+PRECIP "sample_precip"
+TYPE MRMS
+PATH "./precip"
+SUFFIX ".tif"
+MISSING -9999
+CONVERT 1.0
+
+# PET configuration
+PET "sample_pet"
+TYPE GRIDDED
+PATH "./pet"
+SUFFIX ".tif"
+MISSING -9999
+CONVERT 1.0
+
+# Parameter set configuration
+PARAM_SET "sample_params"
+IM 0.001
+KE 0.1
+CE 0.3
+SUM 0.0
+SMS 0.0
+CI 0.9
+CG 0.99
+
+# Routing parameter set configuration
+ROUTING_PARAM_SET "sample_routing_params"
+UNDER 0.1
+LEAKI 0.5
+TH 1000
+ISU 0.0
+ALPHA 3.49
+BETA 0.6
+ALPHA0 1.0 

@@ -3,11 +3,12 @@
 #include <map>
 
 struct LakeInfo {
-    int id;
+    std::string name;
     double lat;
     double lon;
-    double max_volume;
-    double initial_volume;
+    double th_volume;
+    double area;
+    double retention_constant; // Retention constant K (hours)
 };
 
 class LakeModel {
@@ -19,9 +20,15 @@ public:
 
     double GetOutflow() const;
     double GetStorage() const;
-    double GetMaxVolume() const;
+    double GetThVolume() const;
+    std::string GetLakeName() const;
+
+    // Linear reservoir parameter getters and setters
+    void SetRetentionConstant(double K) { retentionConstant = K; }
+    double GetRetentionConstant() const { return retentionConstant; }
 
     // Members
+    std::string lakeName;    // Lake name
     double storage;      // Current storage (m^3)
     double area;         // Surface area (m^2)
     double outflow;      // Outflow (m^3/s)
@@ -29,13 +36,16 @@ public:
     double precipitation;// Precipitation (mm or m)
     double evaporation;  // Evaporation (mm or m)
     double dt;           // Timestep (s)
-    double max_volume;   // Maximum volume (m^3)
+    double th_volume;   // Threshold volume (m^3)
     bool wm_flag;        // Use engineered discharge if true
     std::map<std::string, double>* engineeredDischarge; // Pointer to engineered discharge time series
+    
+    // Linear reservoir parameter for dry season outflow
+    double retentionConstant; // Retention constant K (hours)
 };
 
 // CSV utility for reading engineered discharge
 template<typename T>
 void ReadEngineeredDischargeCSV(const std::string& filename, std::map<std::string, T>& dischargeMap);
 
-void ReadLakeInfoCSV(const std::string& filename, std::map<int, LakeInfo>& lakeInfoMap); 
+void ReadLakeInfoCSV(const std::string& filename, std::map<std::string, LakeInfo>& lakeInfoMap); 

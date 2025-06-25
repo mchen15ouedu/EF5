@@ -15,6 +15,7 @@
 #define ADDINUNDATION(a, b)
 #define ADDPARAMSI(a, b)
 #define ADDPARAMVCI(a, b)
+#define ADDPARAMLAKE(a, b)
 
 enum RUNSTYLE {
   STYLE_SIMU,
@@ -168,6 +169,16 @@ enum VCI_PARAMS {
   PARAM_VCI_QTY,
 };
 
+enum LAKE_PARAMS {
+#undef ADDPARAMLAKE
+#define ADDPARAMLAKE(a, b) PARAM_LAKE_##b,
+#include "Models.tbl"
+#undef ADDPARAMLAKE
+#define ADDPARAMLAKE(a, b)
+
+  PARAM_LAKE_QTY,
+};
+
 extern const char *runStyleStrings[];
 extern const char *modelStrings[];
 extern const char *modelParamSetStrings[];
@@ -196,6 +207,13 @@ extern const char *inundationCaliParamStrings[];
 extern const char **inundationParamStrings[];
 extern const char **inundationParamGridStrings[];
 extern const int numInundationParams[];
+
+extern const char *lakeStrings[];
+extern const char *lakeParamSetStrings[];
+extern const char *lakeCaliParamStrings[];
+extern const char **lakeParamStrings[];
+extern const char **lakeParamGridStrings[];
+extern const int numLakeParams[];
 
 #define IsCalibrationRunStyle(style)                                           \
   ((style) == STYLE_CALI_ARS || (style) == STYLE_CALI_DREAM)

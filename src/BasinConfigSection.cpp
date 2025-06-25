@@ -86,17 +86,21 @@ void BasinConfigSection::LoadLakesFromCSV(const std::string& filename) {
     std::getline(file, line);
     while (std::getline(file, line)) {
         std::istringstream ss(line);
-        std::string name, lat, lon, volumeMax, volumeInitial;
+        std::string name, lat, lon, thVol, area, klake;
         std::getline(ss, name, ',');
         std::getline(ss, lat, ',');
         std::getline(ss, lon, ',');
-        std::getline(ss, volumeMax, ',');
-        std::getline(ss, volumeInitial, ',');
+        std::getline(ss, thVol, ',');
+        std::getline(ss, area, ',');
+        std::getline(ss, klake, ',');
         LakeConfigSection* lake = new LakeConfigSection(name.c_str());
         lake->ProcessKeyValue((char*)"Lat", (char*)lat.c_str());
         lake->ProcessKeyValue((char*)"Lon", (char*)lon.c_str());
-        lake->ProcessKeyValue((char*)"VolumeMax", (char*)volumeMax.c_str());
-        lake->ProcessKeyValue((char*)"VolumeInitial", (char*)volumeInitial.c_str());
+        lake->ProcessKeyValue((char*)"ThVolume", (char*)thVol.c_str());
+        lake->ProcessKeyValue((char*)"Area", (char*)area.c_str());
+        if (!klake.empty()) {
+            lake->ProcessKeyValue((char*)"Klake", (char*)klake.c_str());
+        }
         lakes.push_back(lake);
     }
 }
@@ -206,4 +210,18 @@ void BasinConfigSection::ProcessLakeInletSection(const std::string& lakeName, fl
             break;
         }
     }
+}
+
+double BasinConfigSection::GetEngineeredDischarge(const std::string& lakeName, const std::string& timestamp) const {
+    auto lakeIt = lakeDischargeTS.find(lakeName);
+    if (lakeIt == lakeDischargeTS.end()) {
+        return -1.0; // Lake not found
+    }
+    
+    auto timeIt = lakeIt->second.find(timestamp);
+    if (timeIt == lakeIt->second.end()) {
+        return -1.0; // Timestamp not found
+    }
+    
+    return timeIt->second;
 }

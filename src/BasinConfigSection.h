@@ -27,6 +27,12 @@ public:
   void ProcessLakeInletSection(const std::string& lakeName, float lat, float lon, const std::vector<GridNode>& gridNodes);
   bool customLakeInlets = false;
 
+  // Get engineered discharge for a specific lake and timestamp
+  double GetEngineeredDischarge(const std::string& lakeName, const std::string& timestamp) const;
+  
+  // Get engineered discharge file path
+  const std::string& GetEngineeredDischargeFile() const { return engineeredDischargeFile; }
+
 private:
   bool IsDuplicateGauge(GaugeConfigSection *gauge);
   char name[CONFIG_MAX_LEN];

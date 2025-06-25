@@ -25,6 +25,32 @@
 #include <cmath>
 #include <string.h>
 #include <zlib.h>
+#include "AscGrid.h"
+#include "DatedName.h"
+#include "EF5.h"
+#include "ExecutionController.h"
+#include "FloatGrid.h"
+#include "GaugeConfigSection.h"
+#include "GridWriterFull.h"
+#include "HPModel.h"
+#include "HyMOD.h"
+#include "KinematicRoute.h"
+#include "LinearRoute.h"
+#include "Messages.h"
+#include "Model.h"
+#include "PETConfigSection.h"
+#include "PETReader.h"
+#include "PrecipConfigSection.h"
+#include "PrecipReader.h"
+#include "RPSkewness.h"
+#include "SAC.h"
+#include "Snow17Model.h"
+#include "TempConfigSection.h"
+#include "TempReader.h"
+#include "TimeVar.h"
+#include <fstream>
+#include <sstream>
+#include <limits>
 
 bool Simulator::Initialize(TaskConfigSection *taskN) {
 
@@ -50,14 +76,7 @@ bool Simulator::Initialize(TaskConfigSection *taskN) {
 
   LoadDAFile(task);
 
-  // Lake module: assign lakes to grid nodes if enabled
-  if (task->IsLakeModuleEnabled()) {
-    BasinConfigSection* basin = task->GetBasinSec();
-    basin->AssignLakesToGridNodes(nodes);
-    lakes = basin->lakes; // Copy the lake list for use in simulation
-  } else {
-    lakes.clear();
-  }
+  // Lake module initialization is now handled in InitializeLakes() using LakeModel system
 
   // Everything succeeded!
   return true;
@@ -319,6 +338,12 @@ bool Simulator::InitializeBasic(TaskConfigSection *task) {
     gaugesUsed[i] = false;
   }
 
+  // Initialize lakes
+  if (!InitializeLakes(task)) {
+    ERROR_LOG("Failed to initialize lakes!");
+    return false;
+  }
+
   return true;
 }
 
@@ -455,6 +480,7 @@ bool Simulator::InitializeCali(TaskConfigSection *task) {
   caliParamSec = task->GetCaliParamSec();
   routingCaliParamSec = task->GetRoutingCaliParamSec();
   snowCaliParamSec = task->GetSnowCaliParamSec();
+  lakeCaliParamSec = task->GetLakeCaliParamSec();
   objectiveFunc = caliParamSec->GetObjFunc();
   caliGauge = caliParamSec->GetGauge();
   numWBParams = numModelParams[task->GetModel()];
@@ -467,6 +493,11 @@ bool Simulator::InitializeCali(TaskConfigSection *task) {
     numSParams = numSnowParams[task->GetSnow()];
   } else {
     numSParams = 0;
+  }
+  if (lakeCaliParamSec != NULL) {
+    numLParams = lakeCaliParamSec->GetNumParams();
+  } else {
+    numLParams = 0;
   }
 
   if (timeStepLR) {
@@ -510,6 +541,39 @@ bool Simulator::InitializeCali(TaskConfigSection *task) {
     caliSParams = fullParamSettingsSnow[caliGauge];
   }
 
+  // Initialize lake calibration parameters
+  caliLParams = NULL;
+  if (lakeCaliParamSec != NULL) {
+    // Validate that the specified lake exists
+    std::string targetLakeName = lakeCaliParamSec->GetCalibratedLakeName();
+    bool lakeFound = false;
+    size_t targetLakeIndex = 0;
+    for (size_t i = 0; i < lakeModels.size(); i++) {
+      if (lakeModels[i]->GetLakeName() == targetLakeName) {
+        lakeFound = true;
+        targetLakeIndex = i;
+        break;
+      }
+    }
+    
+    if (!lakeFound) {
+      ERROR_LOGF("Lake calibration specified lake '%s' not found in lake models!", targetLakeName.c_str());
+      return false;
+    }
+    
+    // Allocate lake calibration parameters
+    caliLParams = new float[numLParams];
+    
+    // Use the lakes.csv value as the initial value for calibration
+    for (int i = 0; i < numLParams; i++) {
+      if (i == 0) { // klake parameter
+        caliLParams[i] = static_cast<float>(lakeModels[targetLakeIndex]->GetRetentionConstant());
+      } else {
+        caliLParams[i] = lakeCaliParamSec->GetParamInits()[i];
+      }
+    }
+  }
+
   caliGauge->LoadTS();
 
   // Figure out how many time steps there are going to be
@@ -529,6 +593,7 @@ bool Simulator::InitializeCali(TaskConfigSection *task) {
   if (task->GetSnow() != SNOW_QTY) {
     currentTempCali.resize(totalTimeSteps);
   }
+
   if (!wbModel->IsLumped()) {
     currentFF.resize(nodes.size());
     currentSF.resize(nodes.size());
@@ -674,6 +739,12 @@ void Simulator::CleanUp() {
     if (kv.second) fclose(kv.second);
   }
   lakeOutputFiles.clear();
+  
+  // Clean up lake calibration parameters
+  if (caliLParams != NULL) {
+    delete[] caliLParams;
+    caliLParams = NULL;
+  }
 }
 
 void Simulator::BasinAvg() {
@@ -1449,6 +1520,21 @@ void Simulator::SimulateDistributed(bool trackPeaks) {
     if (rModel && wantsDA) {
       AssimilateData();
     }
+    
+    // Update lake outflows and integrate with routing
+    if (!lakeModels.empty()) {
+      UpdateLakeOutflows(stepHoursReal);
+      
+      // Add lake outflows to the routing input
+      for (size_t i = 0; i < lakeModels.size(); i++) {
+        int nodeIndex = lakeNodeIndices[i];
+        if (nodeIndex < (int)currentFF.size()) {
+          // Add lake outflow to fast flow (channel flow)
+          currentFF[nodeIndex] += lakeOutflows[i] / nodes[nodeIndex].area * 3600.0f; // Convert m³/s to mm/h
+        }
+      }
+    }
+    
     if (rModel) {
 #if _OPENMP
 #ifndef _WIN32
@@ -1788,23 +1874,16 @@ void Simulator::SimulateDistributed(bool trackPeaks) {
 
   // Inject lake outflow into grid nodes if LakeModule is enabled
   if (task->IsLakeModuleEnabled()) {
-    BasinConfigSection* basin = task->GetBasinSec();
-    std::string timestamp = currentTimeText.GetName();
-    for (auto* lake : lakes) {
-      long idx = lake->GetGridNodeIndex();
-      // If engineered discharge is available, set outflow from time series
-      if (!basin->engineeredDischargeFile.empty()) {
-        auto itLake = basin->lakeDischargeTS.find(lake->GetName());
-        if (itLake != basin->lakeDischargeTS.end()) {
-          auto itVal = itLake->second.find(timestamp);
-          if (itVal != itLake->second.end()) {
-            // You may need to add a SetOutflow method to LakeConfigSection or LakeModel
-            lake->SetOutflow(itVal->second);
-          }
-        }
-      }
-      if (idx >= 0 && idx < (long)nodes.size()) {
-        currentFF[idx] += lake->GetOutflow();
+    // Update lake outflows using the new LakeModel system
+    UpdateLakeOutflows(timeStep->GetTimeInSec() / 3600.0f); // Convert seconds to hours
+    
+    // Add lake outflows to routing
+    for (size_t i = 0; i < lakeModels.size(); i++) {
+      int nodeIndex = lakeNodeIndices[i];
+      if (nodeIndex >= 0 && nodeIndex < (int)nodes.size()) {
+        // Convert m³/s to mm/h for routing compatibility
+        float outflow_mmh = lakeOutflows[i] * 3600.0f / nodes[nodeIndex].area;
+        currentFF[nodeIndex] += outflow_mmh;
       }
     }
   }
@@ -1846,45 +1925,84 @@ void Simulator::SimulateDistributed(bool trackPeaks) {
   if (task->IsLakeModuleEnabled()) {
     float dt = timeStep->GetTimeInSec();
     for (auto* lake : lakes) {
+      // Calculate evaporation for the lake area
+      float lakeEvap = 0.0f;
+      long lakeIdx = lake->GetGridNodeIndex();
+      if (lakeIdx >= 0 && lakeIdx < (long)nodes.size()) {
+        // Use PET from the lake's grid node as a proxy for lake evaporation
+        // Note: This is a simplified approach; actual lake evaporation may differ from land PET
+        lakeEvap = currentPETSimu[lakeIdx];
+      }
+      
+      // Set evaporation for output
+      lake->SetEvaporation(lakeEvap);
+      
+      // Set DEM elevation for the lake (needed for head-based outflow calculation)
+      long lakeIdx = lake->GetGridNodeIndex();
+      if (lakeIdx >= 0 && lakeIdx < (long)nodes.size()) {
+        float demElevation = g_DEM->data[nodes[lakeIdx].y][nodes[lakeIdx].x];
+        lake->SetDemElevation(demElevation);
+      }
+      
+      // Check if DamQ is provided for this lake
+      bool damQProvided = false;
+      if (!basin->engineeredDischargeFile.empty()) {
+        auto itLake = basin->lakeDischargeTS.find(lake->GetName());
+        if (itLake != basin->lakeDischargeTS.end()) {
+          std::string timestamp = currentTimeText.GetName();
+          auto itVal = itLake->second.find(timestamp);
+          if (itVal != itLake->second.end()) {
+            damQProvided = true;
+          }
+        }
+      }
+      
+      // Update water balance based on whether DamQ is provided
+      if (damQProvided) {
+        // DamQ provided: use existing outflow, update storage
+        lake->UpdateWaterBalance(dt, lakeEvap);
+      } else {
+        // No DamQ: calculate outflow from storage limits
+        lake->UpdateWaterBalanceAndCalculateOutflow(dt, lakeEvap);
+      }
+      
+      // Enforce additional storage limits (height limits, etc.)
       lake->EnforceStorageLimits(dt);
     }
   }
 
-  // Open lake output files
-  for (auto* lake : lakes) {
-    std::string fname = "ts." + std::string(lake->GetName()) + ".lake.csv";
+  // Lake inflow interception and water balance are now handled in UpdateLakeOutflows()
+  // using the new LakeModel system
+
+  // Open lake output files for the new LakeModel system
+  for (size_t i = 0; i < lakeModels.size(); i++) {
+    std::string lakeName = lakeModels[i]->GetLakeName();
+    std::string fname = "ts." + lakeName + ".lake.csv";
     FILE* f = fopen(fname.c_str(), "w");
     if (f) {
-      fprintf(f, "time,storage,inflow,outflow,h,precipitation\n");
-      lakeOutputFiles[lake->GetName()] = f;
+      fprintf(f, "time,storage,inflow,outflow,precipitation,evaporation\n");
+      lakeOutputFiles[lakeName] = f;
     }
   }
 
+  // Output lake data for the new LakeModel system
   if (task->IsLakeModuleEnabled()) {
     std::string timestamp = currentTimeText.GetName();
-    for (auto* lake : lakes) {
-      // Compute area-weighted average precipitation for the lake's catchment (FAM < lake FAM)
-      long lakeIdx = lake->GetGridNodeIndex();
-      if (lakeIdx < 0 || lakeIdx >= (long)nodes.size()) continue;
-      long lakeX = nodes[lakeIdx].x;
-      long lakeY = nodes[lakeIdx].y;
-      float lakeFAM = g_FAM->data[lakeY][lakeX];
-      double sumPrecip = 0.0, sumArea = 0.0;
-      for (size_t i = 0; i < nodes.size(); ++i) {
-        long x = nodes[i].x;
-        long y = nodes[i].y;
-        if (g_FAM->data[y][x] < lakeFAM) {
-          sumPrecip += currentPrecipSimu[i] * nodes[i].area;
-          sumArea += nodes[i].area;
-        }
-      }
-      float lakePrecip = (sumArea > 0.0) ? (float)(sumPrecip / sumArea) : 0.0f;
-      lake->SetPrecipitation(lakePrecip);
-      // Output to CSV (storage in km3, flows in m3/s, h in m, precipitation in mm)
-      auto it = lakeOutputFiles.find(lake->GetName());
+    for (size_t i = 0; i < lakeModels.size(); i++) {
+      LakeModel* lake = lakeModels[i];
+      std::string lakeName = lake->GetLakeName();
+      
+      // Output to CSV (storage in km³, flows in m³/s, precipitation in mm)
+      auto it = lakeOutputFiles.find(lakeName);
       if (it != lakeOutputFiles.end() && it->second) {
-        float h = (lake->GetArea() > 0.0f) ? (lake->storage / lake->GetArea()) : 0.0f;
-        fprintf(it->second, "%s,%.6f,%.6f,%.6f,%.6f,%.6f\n", timestamp.c_str(), lake->GetStorageKm3(), lake->GetInflow(), lake->GetOutflow(), h, lakePrecip);
+        float storage_km3 = static_cast<float>(lake->GetStorage() / 1e9); // Convert m³ to km³
+        fprintf(it->second, "%s,%.6f,%.6f,%.6f,%.6f,%.6f\n", 
+                timestamp.c_str(), 
+                storage_km3, 
+                static_cast<float>(lake->inflow), 
+                static_cast<float>(lake->outflow), 
+                static_cast<float>(lake->precipitation), 
+                static_cast<float>(lake->evaporation));
       }
     }
   }
@@ -2229,6 +2347,47 @@ void Simulator::SaveForcings(char *file) {
 }
 
 float Simulator::SimulateForCali(float *testParams) {
+  // Apply water balance parameters
+  for (int i = 0; i < numWBParams; i++) {
+    caliWBParams[i] = testParams[i];
+  }
+
+  // Apply routing parameters
+  if (numRParams > 0) {
+    for (int i = 0; i < numRParams; i++) {
+      caliRParams[i] = testParams[numWBParams + i];
+    }
+  }
+
+  // Apply snow parameters
+  if (numSParams > 0) {
+    for (int i = 0; i < numSParams; i++) {
+      caliSParams[i] = testParams[numWBParams + numRParams + i];
+    }
+  }
+
+  // Apply lake parameters
+  if (numLParams > 0) {
+    for (int i = 0; i < numLParams; i++) {
+      caliLParams[i] = testParams[numWBParams + numRParams + numSParams + i];
+    }
+    
+    // Apply lake parameters only to the specific lake being calibrated
+    if (lakeCaliParamSec != NULL) {
+      std::string targetLakeName = lakeCaliParamSec->GetCalibratedLakeName();
+      for (size_t j = 0; j < lakeModels.size(); j++) {
+        if (lakeModels[j]->GetLakeName() == targetLakeName) {
+          // Apply calibration parameters only to this specific lake
+          for (int k = 0; k < numLParams; k++) {
+            if (k == 0) { // klake parameter
+              lakeModels[j]->SetRetentionConstant(caliLParams[k]);
+            }
+          }
+          break; // Found the target lake, no need to continue
+        }
+      }
+    }
+  }
 
   WaterBalanceModel *runModel;
   RoutingModel *runRoutingModel;
@@ -2236,9 +2395,9 @@ float Simulator::SimulateForCali(float *testParams) {
   std::vector<float> currentFFCali, currentSFCali, currentBFCali, currentQCali, simQCali,
       SMCali, GWCali, currentSWECali, currentPrecipSnow;
   TimeVar currentTimeCali;
-  std::map<GaugeConfigSection *, float *> *currentWBParamSettings;
-  std::map<GaugeConfigSection *, float *> *currentRParamSettings;
-  std::map<GaugeConfigSection *, float *> *currentSParamSettings;
+  std::map<GaugeConfigSection *, float *>::iterator currentWBParamSettings;
+  std::map<GaugeConfigSection *, float *>::iterator currentRParamSettings;
+  std::map<GaugeConfigSection *, float *>::iterator currentSParamSettings;
   float *currentWBParams, *currentRParams, *currentSParams;
 #if _OPENMP
   int thread = omp_get_thread_num();
@@ -2314,13 +2473,14 @@ float Simulator::SimulateForCali(float *testParams) {
                                 &currentPrecipSnow, &currentSWECali);
       precipVec = &currentPrecipSnow;
     }
-    /*if (tsIndex == 0) {
-     gaugeMap.GaugeAverage(&nodes, precipVec, &avgPrecip);
-     gaugeMap.GaugeAverage(&nodes, petVec, &avgPET);
-     printf("%f %f\n", precipVec->at(300), petVec->at(300));
-     }*/
+
     runModel->WaterBalance(timeStepHours, precipVec, petVec, &currentFFCali, &currentSFCali,
                            &currentBFCali, &SMCali, &GWCali);
+
+    // Update lake outflows with current calibration parameters
+    if (task->IsLakeModuleEnabled()) {
+      UpdateLakeOutflows(timeStepHours);
+    }
 
     runRoutingModel->Route(timeStepHours, &currentFFCali, &currentSFCali, &currentBFCali,
                            &currentQCali);
@@ -2333,174 +2493,5 @@ float Simulator::SimulateForCali(float *testParams) {
     tsIndex++;
   }
   float skill = CalcObjFunc(&obsQ, &simQCali, objectiveFunc);
-#if _OPENMP
-  // printf("%i: %f %f\n", thread, skill, rP[0]);
-  /*if (skill < -2000.0) {
-   for (unsigned int i = 0; i < tsIndexWarm; i++) {
-   printf("dump %i: %f %f\n", thread, obsQ[i], simQCali[i]);
-   }
-   }*/
-#else
-  // printf("%f\n", skill);
-#endif
   return skill;
-  // return CalcObjFunc(&obsQ, &simQCali, objectiveFunc);
-}
-
-float *Simulator::SimulateForCaliTS(float *testParams) {
-
-  WaterBalanceModel *runModel;
-  std::vector<float> currentFFCali, currentSFCali, currentBFCali, SMCali, GWCali;
-  float *simQCali;
-  TimeVar currentTimeCali;
-  std::map<GaugeConfigSection *, float *> *currentParamSettings;
-  float *currentParams;
-#if 0 // def _OPENMP
-  int thread = omp_get_thread_num();
-  runModel = caliModels[thread];
-  currentParamSettings = &(caliFullParamSettings[thread]);
-  currentParams = caliCurrentParams[thread];
-#else
-  runModel = wbModel;
-  currentParamSettings = &fullParamSettings;
-  currentParams = caliWBParams;
-#endif
-
-  memcpy(currentParams, testParams, sizeof(float) * numWBParams);
-
-  // Initialize our model
-  if (!runModel->IsLumped()) {
-    runModel->InitializeModel(&nodes, currentParamSettings, &paramGrids);
-  } else {
-    runModel->InitializeModel(&lumpedNodes, currentParamSettings, &paramGrids);
-  }
-
-  currentFFCali.resize(currentFF.size());
-  SMCali.resize(currentFF.size());
-  simQCali = new float[simQ.size()];
-
-  // This is the temporal loop for each time step
-  // Here we actually run the model
-  size_t tsIndex = 0, tsIndexWarm = 0;
-  currentTimeCali = beginTime;
-
-  for (currentTimeCali.Increment(timeStep); currentTimeCali <= endTime;
-       currentTimeCali.Increment(timeStep)) {
-
-    std::vector<float> *precipVec = &(currentPrecipCali[tsIndex]);
-    std::vector<float> *petVec = &(currentPETCali[tsIndex]);
-
-    runModel->WaterBalance(timeStepHours, precipVec, petVec, &currentFFCali, &currentBFCali,
-                           &currentSFCali, &SMCali, &GWCali);
-    if (warmEndTime <= currentTimeCali) {
-      if (!runModel->IsLumped()) {
-        simQCali[tsIndexWarm] = currentFFCali[caliGauge->GetGridNodeIndex()];
-      } else {
-        simQCali[tsIndexWarm] = currentFFCali[caliGaugeIndex];
-      }
-      tsIndexWarm++;
-    }
-
-    tsIndex++;
-  }
-
-  return simQCali;
-}
-
-float *Simulator::GetObsTS() {
-  float *obsData = new float[obsQ.size()];
-
-  for (size_t i = 0; i < obsQ.size(); i++) {
-    obsData[i] = obsQ[i];
-  }
-
-  return obsData;
-}
-
-bool Simulator::InitializeGridParams(TaskConfigSection *task) {
-  int numParams = numModelParams[task->GetModel()];
-  std::vector<std::string> *vecGrids = task->GetParamsSec()->GetParamGrids();
-
-  paramGrids.resize(numParams);
-
-  for (int i = 0; i < numParams; i++) {
-    std::string *file = &(vecGrids->at(i));
-    if (file->length() == 0) {
-      paramGrids[i] = NULL;
-    } else {
-      paramGrids[i] = ReadFloatTifGrid(file->c_str());
-      if (!paramGrids[i]) {
-        ERROR_LOGF("Failed to load water balance parameter grid %s\n",
-                   file->c_str());
-        return false;
-      }
-    }
-  }
-
-  if (task->GetRouting() != ROUTE_QTY) {
-    int numRParams = numRouteParams[task->GetRouting()];
-    std::vector<std::string> *vecRouteGrids =
-        task->GetRoutingParamsSec()->GetParamGrids();
-
-    paramGridsRoute.resize(numRParams);
-
-    for (int i = 0; i < numRParams; i++) {
-      std::string *file = &(vecRouteGrids->at(i));
-      if (file->length() == 0) {
-        paramGridsRoute[i] = NULL;
-      } else {
-        paramGridsRoute[i] = ReadFloatTifGrid(file->c_str());
-        if (!paramGridsRoute[i]) {
-          ERROR_LOGF("Failed to load routing parameter grid %s\n",
-                     file->c_str());
-          return false;
-        }
-      }
-    }
-  }
-
-  if (task->GetSnow() != SNOW_QTY) {
-    int numSParams = numSnowParams[task->GetSnow()];
-    std::vector<std::string> *vecSnowGrids =
-        task->GetSnowParamsSec()->GetParamGrids();
-
-    paramGridsSnow.resize(numSParams);
-
-    for (int i = 0; i < numSParams; i++) {
-      std::string *file = &(vecSnowGrids->at(i));
-      if (file->length() == 0) {
-        paramGridsSnow[i] = NULL;
-      } else {
-        paramGridsSnow[i] = ReadFloatTifGrid(file->c_str());
-        if (!paramGridsSnow[i]) {
-          ERROR_LOGF("Failed to load snow parameter grid %s\n", file->c_str());
-          return false;
-        }
-      }
-    }
-  }
-
-  if (task->GetInundation() != INUNDATION_QTY) {
-    int numIParams = numInundationParams[task->GetInundation()];
-    std::vector<std::string> *vecInundationGrids =
-        task->GetInundationParamsSec()->GetParamGrids();
-
-    paramGridsInundation.resize(numIParams);
-
-    for (int i = 0; i < numIParams; i++) {
-      std::string *file = &(vecInundationGrids->at(i));
-      if (file->length() == 0) {
-        paramGridsInundation[i] = NULL;
-      } else {
-        paramGridsInundation[i] = ReadFloatTifGrid(file->c_str());
-        if (!paramGridsInundation[i]) {
-          ERROR_LOGF("Failed to load inundation parameter grid %s\n",
-                     file->c_str());
-          return false;
-        }
-      }
-    }
-  }
-
-  return true;
 }

@@ -15,6 +15,7 @@
 #include "TempConfigSection.h"
 #include "TempReader.h"
 #include "LakeConfigSection.h"
+#include "LakeModel.h"
 #include <map>
 
 class Simulator {
@@ -37,9 +38,11 @@ private:
   bool InitializeSimu(TaskConfigSection *task);
   bool InitializeCali(TaskConfigSection *task);
   bool InitializeGridParams(TaskConfigSection *task);
+  bool InitializeLakes(TaskConfigSection *task);
 
   void SimulateDistributed(bool trackPeaks);
   void SimulateLumped();
+  void UpdateLakeOutflows(float stepHours);
 
   float GetNumSimulatedYears();
   int LoadForcings(PrecipReader *precipReader, PETReader *petReader,
@@ -120,24 +123,29 @@ private:
   CaliParamConfigSection *caliParamSec;
   RoutingCaliParamConfigSection *routingCaliParamSec;
   SnowCaliParamConfigSection *snowCaliParamSec;
+  LakeCaliParamConfigSection *lakeCaliParamSec;
   OBJECTIVES objectiveFunc;
   GaugeConfigSection *caliGauge;
   float *caliWBParams;
   float *caliRParams;
   float *caliSParams;
+  float *caliLParams;
   size_t totalTimeSteps, totalTimeStepsOutsideWarm;
-  int numWBParams, numRParams, numSParams;
+  int numWBParams, numRParams, numSParams, numLParams;
   int caliGaugeIndex;
   std::vector<WaterBalanceModel *> caliWBModels;
   std::vector<RoutingModel *> caliRModels;
   std::vector<SnowModel *> caliSModels;
   std::vector<float *> caliWBCurrentParams, caliRCurrentParams,
-      caliSCurrentParams;
+      caliSCurrentParams, caliLCurrentParams;
   std::vector<std::map<GaugeConfigSection *, float *> > caliWBFullParamSettings,
-      caliRFullParamSettings, caliSFullParamSettings;
+      caliRFullParamSettings, caliSFullParamSettings, caliLFullParamSettings;
 
-  std::vector<LakeConfigSection*> lakes;
+  // Lake-related variables
   std::map<std::string, FILE*> lakeOutputFiles;
+  std::vector<LakeModel*> lakeModels;
+  std::vector<float> lakeOutflows; // Lake outflow rates for each lake
+  std::vector<int> lakeNodeIndices; // Grid node indices where lakes are located
 };
 
 #endif

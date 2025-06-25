@@ -8,8 +8,7 @@ Projection = EPSG:4326
 Lat = 35.5
 Lon = -97.8
 Area = 100000         ; user-defined, in m²
-VolumeMax = 500000    ; user-defined, in m³
-VolumeInitial = 300000
+ThVolume = 500000    ; user-defined, in m³
 
 [LAKEINLET Reservoir1]
 Lat = 35.55

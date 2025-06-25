@@ -9,6 +9,50 @@ Ensemble Framework For Flash Flood Forecasting (EF5)
 EF5 was created by the Hydrometeorology and Remote Sensing Laboratory at the University of Oklahoma.
 The goal of EF5 is to have a framework for distributed hydrologic modeling that is user friendly, adaptable, expandable, all while being suitable for large scale (e.g. continental scale) modeling of flash floods with rapid forecast updates. Currently EF5 incorporates 3 water balance models including the Sacramento Soil Moisture Accouning Model (SAC-SMA), Coupled Routing and Excess Storage (CREST), and hydrophobic (HP). These water balance models can be coupled with either linear reservoir or kinematic wave routing. 
 
+## Features
+
+- Distributed hydrological modeling
+- Multiple water balance models (CREST, SAC, HP, HyMOD)
+- Multiple routing schemes (Kinematic Wave, Linear Reservoir)
+- Snow modeling capabilities
+- Lake and reservoir modeling with calibration support
+- Real-time forecasting capabilities
+- Ensemble forecasting
+- Data assimilation
+
+## Lake Module
+
+EF5 includes a comprehensive lake module that supports:
+
+### Lake Features
+- **Natural outflow modeling**: Storage-based overflow + linear reservoir decay
+- **Engineered discharge**: Support for dam-controlled outflow
+- **Water balance**: Precipitation, evaporation, and inflow integration
+- **Unit conversion**: Automatic km³/km² to m³/m² conversion for user-friendly input
+- **Multiple lakes**: Support for multiple lakes in a single simulation
+
+### Lake Calibration
+The lake module integrates with EF5's DREAM calibration system:
+
+- **klake parameter**: Linear reservoir retention constant (hours)
+- **Automatic calibration**: DREAM algorithm optimizes lake parameters
+- **Parameter ranges**: Configurable min/max/initial values
+- **Objective functions**: All standard EF5 objective functions supported
+
+### Configuration
+```bash
+# Enable lake module
+LAKEMODULE true
+
+# Optional engineered discharge file
+LAKEOUTFLOWFILE "engineered_discharge.csv"
+
+# Lake calibration parameters
+LAKE_CALI_PARAM "lake_cali_example"
+```
+
+See `LAKE_INTEGRATION_README.md` for detailed documentation.
+
 ## Learn More
 
 EF5 has a homepage at [http://ef5.ou.edu](http://ef5.ou.edu). The training modules are found at [http://ef5.ou.edu/training/](http://ef5.ou.edu/training/) while the YouTube videos may be found at [https://www.youtube.com/channel/UCgoGJtdeqHgwoYIRhkgMwog](https://www.youtube.com/channel/UCgoGJtdeqHgwoYIRhkgMwog). The source code is found on GitHub at [https://github.com/HyDROSLab/EF5](https://github.com/HyDROSLab/EF5).

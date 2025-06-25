@@ -16,7 +16,7 @@ CONFIG_SEC_RET LakeConfigSection::ProcessKeyValue(char *key, char *value) {
         lon = static_cast<float>(atof(value));
         return VALID_RESULT;
     } else if (strcmp(key, "Area") == 0) {
-        area = static_cast<float>(atof(value));
+        area = static_cast<float>(atof(value)) * 1e6f; // km² to m²
         return VALID_RESULT;
     } else if (strcmp(key, "MaxDepth") == 0) {
         maxDepth = static_cast<float>(atof(value));
@@ -27,11 +27,11 @@ CONFIG_SEC_RET LakeConfigSection::ProcessKeyValue(char *key, char *value) {
     } else if (strcmp(key, "OutflowFile") == 0) {
         outflowFile = value;
         return VALID_RESULT;
-    } else if (strcmp(key, "VolumeMax") == 0) {
-        volumeMax = static_cast<float>(atof(value));
+    } else if (strcmp(key, "ThVolume") == 0) {
+        thVolume = static_cast<float>(atof(value)) * 1e9f; // km³ to m³
         return VALID_RESULT;
-    } else if (strcmp(key, "VolumeInitial") == 0) {
-        volumeInitial = static_cast<float>(atof(value));
+    } else if (strcmp(key, "Klake") == 0) {
+        retentionConstant = static_cast<float>(atof(value)); // hours
         return VALID_RESULT;
     }
     return INVALID_RESULT;

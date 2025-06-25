@@ -184,6 +184,10 @@ GaugeConfigSection *TaskConfigSection::GetDefaultGauge() {
   return defaultGauge;
 }
 
+LakeCaliParamConfigSection *TaskConfigSection::GetLakeCaliParamSec() {
+  return caliParamLake;
+}
+
 CONFIG_SEC_RET TaskConfigSection::ProcessKeyValue(char *name, char *value) {
 
   if (!strcasecmp(name, "style")) {
@@ -541,8 +545,21 @@ CONFIG_SEC_RET TaskConfigSection::ProcessKeyValue(char *name, char *value) {
     }
     caliParamInundation = itr->second;
     inundationCaliParamSet = true;
+  } else if (!strcasecmp(name, "lake_cali_param")) {
+    TOLOWER(value);
+    std::map<std::string, LakeCaliParamConfigSection *>::iterator itr =
+        g_lakeCaliParamConfigs.find(value);
+    if (itr == g_lakeCaliParamConfigs.end()) {
+      ERROR_LOGF("Unknown lake calibration parameter set \"%s\"!", value);
+      return INVALID_RESULT;
+    }
+    caliParamLake = itr->second;
+    lakeCaliParamSet = true;
   } else if (strcmp(name, "LakeModule") == 0) {
     lakeModuleEnabled = (strcmp(value, "true") == 0 || strcmp(value, "1") == 0);
+    return VALID_RESULT;
+  } else if (strcmp(name, "LakeOutflowFile") == 0) {
+    lakeOutflowFile = value;
     return VALID_RESULT;
   } else {
     ERROR_LOGF("Unknown task configuration option \"%s\"", name);
@@ -633,6 +650,16 @@ CONFIG_SEC_RET TaskConfigSection::ValidateSection() {
 
     if (snowSet && !snowCaliParamSet) {
       ERROR_LOG("The calibration snow parameter set was not specified");
+      return INVALID_RESULT;
+    }
+
+    if (lakeModuleEnabled && !lakeCaliParamSet) {
+      ERROR_LOG("The calibration lake parameter set was not specified but lake module is enabled");
+      return INVALID_RESULT;
+    }
+
+    if (!lakeModuleEnabled && lakeCaliParamSet) {
+      ERROR_LOG("Lake calibration parameters were specified but lake module is disabled");
       return INVALID_RESULT;
     }
 

@@ -366,3 +366,63 @@ const int numInundationParams[] = {
 #undef ADDINUNDATION
 #define ADDINUNDATION(a, b)
 };
+
+const char *lakeStrings[] = {
+#undef ADDMODEL
+#define ADDMODEL(a, b) a,
+#include "Models.tbl"
+#undef ADDMODEL
+#define ADDMODEL(a, b)
+};
+
+const char *lakeParamSetStrings[] = {
+#undef ADDMODEL
+#define ADDMODEL(a, b) a "paramset",
+#include "Models.tbl"
+#undef ADDMODEL
+#define ADDMODEL(a, b)
+};
+
+const char *lakeCaliParamStrings[] = {
+#undef ADDMODEL
+#define ADDMODEL(a, b) a "caliparams",
+#include "Models.tbl"
+#undef ADDMODEL
+#define ADDMODEL(a, b)
+};
+
+namespace paramLakeStrings {
+const char *LAKE[] = {
+#undef ADDPARAMLAKE
+#define ADDPARAMLAKE(a, b) a,
+#include "Models.tbl"
+#undef ADDPARAMLAKE
+#define ADDPARAMLAKE(a, b)
+};
+} // namespace paramLakeStrings
+
+const char **lakeParamStrings[] = {
+    paramLakeStrings::LAKE,
+};
+
+namespace paramLakeGridStrings {
+const char *LAKE[] = {
+#undef ADDPARAMLAKE
+#define ADDPARAMLAKE(a, b) a "_grid",
+#include "Models.tbl"
+#undef ADDPARAMLAKE
+#define ADDPARAMLAKE(a, b)
+};
+} // namespace paramLakeGridStrings
+
+const char **lakeParamGridStrings[] = {
+    paramLakeGridStrings::LAKE,
+};
+
+const int numLakeParams[] = {
+#undef ADDMODEL
+#define ADDMODEL(a, b) PARAM_##b##_QTY,
+#include "Models.tbl"
+#undef ADDMODEL
+#define ADDMODEL(a, b)
+};

@@ -19,11 +19,17 @@ StartDate = 2024-01-01
 EndDate = 2024-12-31
 LakeModule = true
 
-# Example lakes.csv:
-# name,lat,lon,area,volumeMax,volumeInitial
-# LakeA,35.1,-97.2,100000,500000,300000
-# LakeB,36.2,-98.3,120000,600000,400000
-# Reservoir1,35.5,-97.8,150000,700000,500000
+# Example lakes.csv (combined overflow + linear reservoir with user-friendly units):
+# name,lat,lon,th_volume,area,klake
+# LakeA,35.1,-97.2,0.1,0.5,24.0
+# LakeB,36.2,-98.3,0.12,0.6,48.0
+# Reservoir1,35.5,-97.8,0.15,0.7,12.0
+# Note: 
+# - Wet season: Outflow occurs when storage > thVolume (storage-based overflow)
+# - Dry season: Linear reservoir outflow with exponential decay (O = S/K * exp(-dt/K))
+# - Units: th_volume (km³), area (km²), klake (hours)
+# - Initial storage = thVolume (lakes start full)
+# - When storage = 0, outflow = 0 (naturally)
 
 # Example engineered_discharge.csv:
 # time,Reservoir1

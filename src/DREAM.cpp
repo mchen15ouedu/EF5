@@ -9,19 +9,24 @@
 #include <omp.h>
 #endif
 #include "DREAM.h"
+#include "CaliParamConfigSection.h"
+#include "LakeCaliParamConfigSection.h"
 
 void DREAM::Initialize(CaliParamConfigSection *caliParamConfigNew,
                        RoutingCaliParamConfigSection *routingCaliParamConfigNew,
                        SnowCaliParamConfigSection *snowCaliParamConfigNew,
-                       int numParamsWBNew, int numParamsRNew, int numParamsSNew,
+                       LakeCaliParamConfigSection *lakeCaliParamConfigNew,
+                       int numParamsWBNew, int numParamsRNew, int numParamsSNew, int numParamsLNew,
                        Simulator *simNew) {
   caliParamConfig = caliParamConfigNew;
   routingCaliParamConfig = routingCaliParamConfigNew;
   snowCaliParamConfig = snowCaliParamConfigNew;
+  lakeCaliParamConfig = lakeCaliParamConfigNew;
   numParamsWB = numParamsWBNew;
   numParamsR = numParamsRNew;
   numParamsS = numParamsSNew;
-  numParams = numParamsWBNew + numParamsRNew + numParamsSNew;
+  numParamsL = numParamsLNew;
+  numParams = numParamsWBNew + numParamsRNew + numParamsSNew + numParamsLNew;
   sim = simNew;
   isEnsemble = false;
 
@@ -48,8 +53,8 @@ void DREAM::Initialize(CaliParamConfigSection *caliParamConfigNew,
   minParams = new float[numParams];
   maxParams = new float[numParams];
 
-  INFO_LOGF("num params is %i (water balance :%i, routing: %i, snow: %i)",
-            numParams, numParamsWB, numParamsR, numParamsS);
+  INFO_LOGF("num params is %i (water balance :%i, routing: %i, snow: %i, lake: %i)",
+            numParams, numParamsWB, numParamsR, numParamsS, numParamsL);
 
   // Stuff from CaliParamConfigSection
 
@@ -66,6 +71,12 @@ void DREAM::Initialize(CaliParamConfigSection *caliParamConfigNew,
            snowCaliParamConfig->GetParamMins(), sizeof(float) * numParamsS);
     memcpy(&(maxParams[numParamsWB + numParamsR]),
            snowCaliParamConfig->GetParamMaxs(), sizeof(float) * numParamsS);
+  }
+  if (numParamsL > 0) {
+    memcpy(&(minParams[numParamsWB + numParamsR + numParamsS]),
+           lakeCaliParamConfig->GetParamMins(), sizeof(float) * numParamsL);
+    memcpy(&(maxParams[numParamsWB + numParamsR + numParamsS]),
+           lakeCaliParamConfig->GetParamMaxs(), sizeof(float) * numParamsL);
   }
 
   // srand48(0);
@@ -620,6 +631,24 @@ void DREAM::WriteOutput(char *outputFile, MODELS model, ROUTES route,
         numModelParams[model] + numRouteParams[route] + numSnowParams[snow];
     for (i = starti; i < endi; i++) {
       fprintf(file, "%s=%f\n", snowParamStrings[snow][i - starti],
+              bestParams[i]);
+    }
+  }
+
+  if (numParamsL > 0) {
+    fprintf(file, "[Lake]\n");
+    int starti = numModelParams[model] + numRouteParams[route] + numSnowParams[snow];
+    int endi = starti + numParamsL;
+    
+    // Add lake calibration information
+    if (lakeCaliParamConfig != NULL) {
+      std::string targetLakeName = lakeCaliParamConfig->GetCalibratedLakeName();
+      fprintf(file, "# Calibrated Lake: %s\n", targetLakeName.c_str());
+      fprintf(file, "# Parameter\tBest_Value\tMin\tMax\tInitial\n");
+    }
+    
+    for (i = starti; i < endi; i++) {
+      fprintf(file, "%s=%f\n", lakeCaliParamConfig->GetParamString(i - starti),
               bestParams[i]);
     }
   }
