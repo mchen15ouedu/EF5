@@ -16,17 +16,27 @@ KWRoute::KWRoute() {}
 KWRoute::~KWRoute() {}
 
 float KWRoute::SetObsInflow(long index, float inflow) {
-  float prev = 0.0;
-  GridNode *node = NULL;
-  KWGridNode *cNode = NULL;
-  GaugeConfigSection *thisGauge = NULL;
-
-  if (index >= 0 && index < (long)nodes->size()) {
-    node = &nodes->at(index);
-    cNode = &(kwNodes[index]);
-    thisGauge = node->gauge;
+  KWGridNode *cNode = &(kwNodes[index]);
+  GridNode *node = &nodes->at(index);
+  float prev;
+  if (!node->channelGridCell) {
+    prev = cNode->states[STATE_KW_PQ] * node->horLen;
+    cNode->states[STATE_KW_PQ] = inflow / node->horLen;
+    cNode->incomingWaterOverland = inflow / node->horLen;
+  } else {
     prev = cNode->states[STATE_KW_PQ];
-    float multiplier = inflow / prev;
+    float diff = 0.0;
+    if (inflow > 1.0 && prev > 1.0) {
+      diff = inflow / prev - 1.0;
+    }
+    GaugeConfigSection *thisGauge = node->gauge;
+    float multiplier = 1.0;
+    if (diff > 0.2) {
+      multiplier = 0.5;
+    } else if (diff < -0.2) {
+      multiplier = 2.0;
+    }
+    printf(" Multiplier %f,%f,%f,%f ", multiplier, diff, inflow, prev);
     if (multiplier != 1.0) {
       size_t numNodes = nodes->size();
       for (size_t i = 0; i < numNodes; i++) {
@@ -34,8 +44,8 @@ float KWRoute::SetObsInflow(long index, float inflow) {
         if (node->gauge == thisGauge) {
           KWGridNode *cNode = &(kwNodes[i]);
           cNode->params[PARAM_KINEMATIC_ALPHA] *= multiplier;
-          if (cNode->params[PARAM_KINEMATIC_ALPHA] < MIN_THRESHOLD) {
-            cNode->params[PARAM_KINEMATIC_ALPHA] = MIN_THRESHOLD;
+          if (cNode->params[PARAM_KINEMATIC_ALPHA] < 0.01) {
+            cNode->params[PARAM_KINEMATIC_ALPHA] = 0.01;
           } else if (cNode->params[PARAM_KINEMATIC_ALPHA] > 200.0) {
             cNode->params[PARAM_KINEMATIC_ALPHA] = 200.0;
           }

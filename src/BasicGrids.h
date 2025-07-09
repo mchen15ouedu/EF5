@@ -27,7 +27,13 @@ void CarveBasin(
     float *defaultSnowParams,
     std::map<GaugeConfigSection *, float *> *inInundationParamSettings,
     std::map<GaugeConfigSection *, float *> *outInundationParamSettings,
-    float *defaultInundationParams);
+    float *defaultInundationParams,
+    bool skipGaugeRelationships = false);
+
+
+
+// Function to carve lake parameters from lake data to grid nodes
+void CarveLakeParameters(BasinConfigSection *basin, std::vector<GridNode> *nodes);
 void MakeBasic();
 void ReclassifyDDM();
 bool CheckESRIDDM();

@@ -72,6 +72,14 @@ const char *SAC[] = {
 #define ADDPARAMSAC(a, b)
 };
 
+const char *LAKE[] = {
+#undef ADDPARAMLAKE
+#define ADDPARAMLAKE(a, b) a,
+#include "Models.tbl"
+#undef ADDPARAMLAKE
+#define ADDPARAMLAKE(a, b)
+};
+
 } // namespace paramStrings
 
 const char **modelParamStrings[] = {
@@ -80,6 +88,7 @@ const char **modelParamStrings[] = {
     paramStrings::CRESTPHYS,
     paramStrings::HYMOD,
     paramStrings::SAC,
+    paramStrings::LAKE,
 
 };
 
@@ -125,6 +134,14 @@ const char *SAC[] = {
 #undef ADDPARAMSAC
 #define ADDPARAMSAC(a, b)
 };
+
+const char *LAKE[] = {
+#undef ADDPARAMLAKE
+#define ADDPARAMLAKE(a, b) a "_grid",
+#include "Models.tbl"
+#undef ADDPARAMLAKE
+#define ADDPARAMLAKE(a, b)
+};
 } // namespace paramGridStrings
 
 const char **modelParamGridStrings[] = {
@@ -132,7 +149,8 @@ const char **modelParamGridStrings[] = {
      paramGridStrings::CREST,
     paramGridStrings::CRESTPHYS,
     paramGridStrings::HYMOD,
-    paramGridStrings::SAC};
+    paramGridStrings::SAC,
+    paramGridStrings::LAKE};
 
 const int numModelParams[] = {
 #undef ADDMODEL
@@ -375,13 +393,7 @@ const char *lakeStrings[] = {
 #define ADDMODEL(a, b)
 };
 
-const char *lakeParamSetStrings[] = {
-#undef ADDMODEL
-#define ADDMODEL(a, b) a "paramset",
-#include "Models.tbl"
-#undef ADDMODEL
-#define ADDMODEL(a, b)
-};
+
 
 const char *lakeCaliParamStrings[] = {
 #undef ADDMODEL

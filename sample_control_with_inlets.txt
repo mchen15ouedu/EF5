@@ -1,0 +1,46 @@
+# Sample control file with lake inlet configuration
+# This shows how to configure multiple inlets for lakes
+
+[TASK]
+Model = LAKE
+LakeModule = TRUE
+# ... other task parameters ...
+
+[LAKE]
+Name = Lake1
+Lat = 45.123
+Lon = -75.456
+Area = 100.0
+ThVolume = 1.5
+Klake = 24.0
+obsFam = 5000.0
+
+[LAKE]
+Name = Lake2
+Lat = 45.234
+Lon = -75.567
+Area = 150.0
+ThVolume = 2.0
+Klake = 48.0
+
+# Inlet configurations for Lake1
+[inlet Alake1]
+lakename = Lake1
+lat = 45.100
+lon = -75.400
+inletq = data/inletA_lake1.csv
+
+[inlet Blake1]
+lakename = Lake1
+lat = 45.110
+lon = -75.410
+inletq = data/inletB_lake1.csv
+
+# Inlet configuration for Lake2
+[inlet Alake2]
+lakename = Lake2
+lat = 45.200
+lon = -75.500
+inletq = data/inletA_lake2.csv
+
+# ... rest of control file ... 

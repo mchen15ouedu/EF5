@@ -5,11 +5,17 @@
 #include <string>
 #include <vector>
 #include <cmath>
+#include <cstring>
+#include <cstdlib>
+#include <map>
 
 struct LakeInlet {
     float lat;
     float lon;
     long gridNodeIndex;
+    
+    LakeInlet(float lat_val, float lon_val, long grid_idx) 
+        : lat(lat_val), lon(lon_val), gridNodeIndex(grid_idx) {}
 };
 
 class LakeConfigSection : public ConfigSection {
@@ -32,7 +38,9 @@ public:
     float GetOutflow() const { return outflow; }
     void SetInflow(float val) { inflow = val; }
     float GetInflow() const { return inflow; }
-    void AddInlet(float lat, float lon, long gridIdx) { inlets.push_back({lat, lon, gridIdx}); }
+    void AddInlet(float lat, float lon, long gridIdx) { 
+        inlets.push_back(LakeInlet(lat, lon, gridIdx)); 
+    }
     const std::vector<LakeInlet>& GetInlets() const { return inlets; }
     float GetHMax() const { return (area > 0.0f) ? (thVolume / area) : 0.0f; }
     void EnforceStorageLimits(float dt) {
@@ -95,6 +103,11 @@ public:
     void SetRetentionConstant(float K) { retentionConstant = K; }
     float GetRetentionConstant() const { return retentionConstant; }
     
+    // Observed flow accumulation for FAM-based location finding (optional)
+    void SetObsFlowAccum(float value) { obsFlowAccum = value; obsFlowAccumSet = true; }
+    float GetObsFlowAccum() const { return obsFlowAccum; }
+    bool HasObsFlowAccum() const { return obsFlowAccumSet; }
+    
     // Calculate linear reservoir outflow for dry season (when storage <= th_volume)
     float CalculateLinearReservoirOutflow(float dt) {
         if (storage <= 0.0f || retentionConstant <= 0.0f) {
@@ -125,36 +138,32 @@ public:
         }
     }
 
-    CONFIG_SEC_RET ProcessKeyValue(char *name, char *value) override {
-        if (strcmp(name, "Area") == 0) { area = static_cast<float>(atof(value)) * 1e6f; return VALID_RESULT; } // km2 to m2
-        if (strcmp(name, "ThVolume") == 0) { thVolume = static_cast<float>(atof(value)) * 1e9f; return VALID_RESULT; } // km3 to m3
-        if (strcmp(name, "OutflowFile") == 0) { outflowFile = value; return VALID_RESULT; }
-        if (strcmp(name, "GridNodeIndex") == 0) { gridNodeIndex = static_cast<long>(atof(value)); return VALID_RESULT; }
-        if (strcmp(name, "Outflow") == 0) { outflow = static_cast<float>(atof(value)); return VALID_RESULT; }
-        if (strcmp(name, "Inflow") == 0) { inflow = static_cast<float>(atof(value)); return VALID_RESULT; }
-        if (strcmp(name, "Precipitation") == 0) { precipitation = static_cast<float>(atof(value)); return VALID_RESULT; }
-        if (strcmp(name, "Klake") == 0) { retentionConstant = static_cast<float>(atof(value)); return VALID_RESULT; } // hours
-        return ConfigSection::ProcessKeyValue(name, value);
-    }
-    CONFIG_SEC_RET ValidateSection() override;
+    CONFIG_SEC_RET ProcessKeyValue(char *name, char *value);
+    CONFIG_SEC_RET ValidateSection();
+
+    static bool IsDuplicate(char *name);
 
 private:
     std::string name;
-    float lat = 0.0f;
-    float lon = 0.0f;
-    float area = 0.0f;
-    float maxDepth = 0.0f;
-    float initialLevel = 0.0f;
-    float thVolume = 0.0f;
+    float lat;
+    float lon;
+    float area;
+    float maxDepth;
+    float initialLevel;
+    float thVolume;
     std::string outflowFile;
-    long gridNodeIndex = -1;
-    float outflow = 0.0f;
-    float inflow = 0.0f;
-    float storage = 0.0f;
-    float precipitation = 0.0f;
-    float evaporation = 0.0f;
-    float retentionConstant = 0.0f;
+    long gridNodeIndex;
+    float outflow;
+    float inflow;
+    float storage;
+    float precipitation;
+    float evaporation;
+    float retentionConstant;
+    float obsFlowAccum;
+    bool obsFlowAccumSet;
     std::vector<LakeInlet> inlets;
 };
+
+extern std::map<std::string, LakeConfigSection *> g_lakeConfigs;
 
 #endif // CONFIG_LAKE_SECTION_H 

@@ -1,0 +1,60 @@
+# EF5 Control File with Lake CSV Reading Support
+# This example shows how to read multiple lakes from CSV files
+
+# Lake Module Configuration
+LakeModule=true
+
+# Lakes CSV file (alternative to LakeParamSet when LakeModule=true)
+lakes_csv=lakes.csv
+
+# Optional: Engineered discharge CSV file
+engineered_discharge_csv=engineered_discharge.csv
+
+[basic]
+dem: dem.asc
+ddm: ddm.asc
+fam: fam.asc
+projection: geographic
+
+[basin basin1]
+gauge: gauge1
+gauge: gauge2
+lakes_csv: lakes.csv
+engineered_discharge_csv: engineered_discharge.csv
+
+[gauge gauge1]
+lat: 45.123
+lon: -122.456
+flowaccum: 1000
+cellx: 100
+celly: 200
+outputts: true
+
+[gauge gauge2]
+lat: 45.234
+lon: -122.567
+flowaccum: 2000
+cellx: 150
+celly: 250
+outputts: true
+
+[precipforcing precip1]
+file: precip.nc
+unit_time: 1H
+unit_value: mm
+
+[petforcing pet1]
+file: pet.nc
+unit_time: 1H
+unit_value: mm
+
+[task task1]
+style: simu
+model: lake
+basin: basin1
+precip: precip1
+pet: pet1
+output: output
+time_begin: 2024-01-01 00:00:00
+time_end: 2024-01-31 23:59:59
+timestep: 1H 

@@ -4,6 +4,7 @@
 #include "Defines.h"
 #include "Messages.h"
 #include "TifGrid.h"
+#include "LakeModel.h"
 #include <algorithm>
 #include <climits>
 #include <cmath>
@@ -648,7 +649,8 @@ void CarveBasin(
     float *defaultSnowParams,
     std::map<GaugeConfigSection *, float *> *inInundationParamSettings,
     std::map<GaugeConfigSection *, float *> *outInundationParamSettings,
-    float *defaultInundationParams) {
+    float *defaultInundationParams,
+    bool skipGaugeRelationships) {
 
   std::vector<GaugeConfigSection *> *gauges = basin->GetGauges();
   std::stack<GridNode *> walkNodes;
@@ -984,8 +986,10 @@ void CarveBasin(
         keepGoing = nodeGauge->ContinueUpstream();
 
         // Add this to the gauge map which allows us to figure out upstream
-        // gauges & contributions
-        gaugeMap->AddUpstreamGauge(prevGauge, nodeGauge);
+        // gauges & contributions (skip if loading from state)
+        if (!skipGaugeRelationships) {
+          gaugeMap->AddUpstreamGauge(prevGauge, nodeGauge);
+        }
 
         // We fill in outParamSettings for the new gauge here
         // Since it is not required that inParamSettings contain parameters for
@@ -1110,6 +1114,37 @@ void CarveBasin(
   fclose(fp);
   fclose(fp2);
   */
+}
+
+void CarveLakeParameters(BasinConfigSection *basin, std::vector<GridNode> *nodes) {
+  // Get lakes from basin configuration
+  std::vector<LakeInfo> *lakes = basin->GetLakes();
+  if (!lakes || lakes->empty()) {
+    return; // No lakes to carve
+  }
+
+  // For each lake, find its grid location and log the location for debugging
+  for (size_t i = 0; i < lakes->size(); i++) {
+    LakeInfo& lake = lakes->at(i);
+    
+    // Convert lat/lon to grid coordinates
+    GridLoc lakeLoc;
+    if (!g_FAM->GetGridLoc(lake.lon, lake.lat, &lakeLoc)) {
+      WARNING_LOGF("Lake %s is outside the basic grid domain!\n", lake.name.c_str());
+      continue;
+    }
+    
+    // Find the grid node that corresponds to this lake location
+    for (size_t j = 0; j < nodes->size(); j++) {
+      GridNode& node = nodes->at(j);
+      if (node.x == lakeLoc.x && node.y == lakeLoc.y) {
+        // Found the lake node - log the location for debugging
+        INFO_LOGF("Found lake %s at grid node (%ld, %ld) with retention constant (klake) = %.6f", 
+                  lake.name.c_str(), node.x, node.y, lake.retention_constant);
+        break;
+      }
+    }
+  }
 }
 
 bool GetDownstreamHeight(long x, long y, long *outsideHeight) {

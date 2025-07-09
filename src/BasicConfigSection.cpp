@@ -30,10 +30,6 @@ char *BasicConfigSection::GetCopyright() { return copyright; }
 
 PROJECTIONS BasicConfigSection::GetProjection() { return projection; }
 
-char *BasicConfigSection::GetEngineeredDischargeFile() { return engineeredDischargeFile; }
-
-char *BasicConfigSection::GetLakeInfoFile() { return lakeInfoFile; }
-
 CONFIG_SEC_RET BasicConfigSection::ProcessKeyValue(char *name, char *value) {
 
   if (!strcasecmp(name, "dem")) {
@@ -95,10 +91,6 @@ CONFIG_SEC_RET BasicConfigSection::ProcessKeyValue(char *name, char *value) {
       INFO_LOGF("Valid Self FAM options are \"%s\"", "TRUE, FALSE");
       return INVALID_RESULT;
     }
-  } else if (!strcasecmp(name, "engineered_discharge_file")) {
-    strcpy(engineeredDischargeFile, value);
-  } else if (!strcasecmp(name, "lake_info_file")) {
-    strcpy(lakeInfoFile, value);
   } else {
     ERROR_LOGF("Unknown name-key pair \"%s\"", name);
     return INVALID_RESULT;

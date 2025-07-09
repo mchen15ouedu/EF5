@@ -1,23 +1,24 @@
 #include "LakeCaliParamConfigSection.h"
 #include "Messages.h"
+#include "Model.h"
 #include <cstring>
+#include <cstdlib>
 
 std::map<std::string, LakeCaliParamConfigSection *> g_lakeCaliParamConfigs;
 
 LakeCaliParamConfigSection::LakeCaliParamConfigSection(const char *nameVal)
-    : CaliParamConfigSection(nameVal) {
+    : CaliParamConfigSection((char*)nameVal, MODEL_LAKE) {
   // Initialize with lake parameter definitions from Model.h
-  numParams = numLakeParams[0]; // Assuming lake parameters are the same for all lake types
-  paramMins = new float[numParams];
-  paramMaxs = new float[numParams];
-  paramInits = new float[numParams];
+  int numLakeParam = numLakeParams[0]; // Assuming lake parameters are the same for all lake types
+  float *paramMins = GetParamMins();
+  float *paramMaxs = GetParamMaxs();
 
   // Set default parameter ranges for lake parameters
   // These should match the definitions in Models.tbl
-  for (int i = 0; i < numParams; i++) {
+  // Note: Lake parameters don't need initial values as they come from lakes.csv
+  for (int i = 0; i < numLakeParam; i++) {
     paramMins[i] = 0.0f;   // Default minimum
     paramMaxs[i] = 10.0f;  // Default maximum
-    paramInits[i] = 1.0f;  // Default initial value (will be overridden by lakes.csv)
   }
 }
 
@@ -27,7 +28,7 @@ LakeCaliParamConfigSection::~LakeCaliParamConfigSection() {
 
 CONFIG_SEC_RET LakeCaliParamConfigSection::ProcessKeyValue(char *name, char *value) {
   // Handle lake name specification
-  if (!strcasecmp(name, "lake_name")) {
+  if (!strcasecmp(name, "lake_name") || !strcasecmp(name, "lakename") || !strcasecmp(name, "LakeName")) {
     calibratedLakeName = value;
     return VALID_RESULT;
   }
@@ -38,6 +39,8 @@ CONFIG_SEC_RET LakeCaliParamConfigSection::ProcessKeyValue(char *name, char *val
     char* comma = strchr(value, ',');
     if (comma != NULL) {
       *comma = '\0'; // Split the string
+      float *paramMins = GetParamMins();
+      float *paramMaxs = GetParamMaxs();
       paramMins[0] = (float)atof(value);
       paramMaxs[0] = (float)atof(comma + 1);
       return VALID_RESULT;
@@ -59,12 +62,15 @@ CONFIG_SEC_RET LakeCaliParamConfigSection::ValidateSection() {
   }
 
   // Validate lake calibration parameters
-  if (numParams <= 0) {
+  int numLakeParam = numLakeParams[0];
+  if (numLakeParam <= 0) {
     ERROR_LOG("Lake calibration section must have at least one parameter!");
     return INVALID_RESULT;
   }
 
-  for (int i = 0; i < numParams; i++) {
+  float *paramMins = GetParamMins();
+  float *paramMaxs = GetParamMaxs();
+  for (int i = 0; i < numLakeParam; i++) {
     if (paramMins[i] >= paramMaxs[i]) {
       ERROR_LOGF("Lake parameter %d: minimum value must be less than maximum value!", i);
       return INVALID_RESULT;

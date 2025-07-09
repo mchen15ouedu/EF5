@@ -19,8 +19,6 @@ public:
   PROJECTIONS GetProjection();
   bool IsESRIDDM() { return esriDDM; }
   bool IsSelfFAM() { return selfFAM; }
-  char *GetEngineeredDischargeFile();
-  char *GetLakeInfoFile();
   CONFIG_SEC_RET ProcessKeyValue(char *name, char *value);
   CONFIG_SEC_RET ValidateSection();
 
@@ -33,8 +31,6 @@ private:
   char artist[CONFIG_MAX_LEN];
   char copyright[CONFIG_MAX_LEN];
   PROJECTIONS projection;
-  char engineeredDischargeFile[CONFIG_MAX_LEN];
-  char lakeInfoFile[CONFIG_MAX_LEN];
 };
 
 extern BasicConfigSection *g_basicConfig;

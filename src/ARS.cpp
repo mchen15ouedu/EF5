@@ -7,13 +7,18 @@
 void ARS::Initialize(CaliParamConfigSection *caliParamConfigNew,
                      RoutingCaliParamConfigSection *routingCaliParamConfigNew,
                      SnowCaliParamConfigSection *snowCaliParamConfigNew,
-                     int numParamsWBNew, int numParamsRNew, int numParamsSNew,
+                     LakeCaliParamConfigSection *lakeCaliParamConfigNew,
+                     int numParamsWBNew, int numParamsRNew, int numParamsSNew, int numParamsLNew,
                      Simulator *simNew) {
   caliParamConfig = caliParamConfigNew;
   routingCaliParamConfig = routingCaliParamConfigNew;
+  snowCaliParamConfig = snowCaliParamConfigNew;
+  lakeCaliParamConfig = lakeCaliParamConfigNew;
   numParamsWB = numParamsWBNew;
-  numParamsR = numParamsR;
-  numParams = numParamsWBNew + numParamsRNew;
+  numParamsR = numParamsRNew;
+  numParamsS = numParamsSNew;
+  numParamsL = numParamsLNew;
+  numParams = numParamsWBNew + numParamsRNew + numParamsSNew + numParamsLNew;
   sim = simNew;
 
   // Create storage arrays
@@ -22,8 +27,26 @@ void ARS::Initialize(CaliParamConfigSection *caliParamConfigNew,
   currentParams = new float[numParams];
 
   // Stuff from CaliParamConfigSection
-  memcpy(minParams, caliParamConfig->GetParamMins(), sizeof(float) * numParams);
-  memcpy(maxParams, caliParamConfig->GetParamMaxs(), sizeof(float) * numParams);
+  memcpy(minParams, caliParamConfig->GetParamMins(), sizeof(float) * numParamsWB);
+  memcpy(maxParams, caliParamConfig->GetParamMaxs(), sizeof(float) * numParamsWB);
+  
+  // Copy routing parameters
+  if (numParamsR > 0) {
+    memcpy(&(minParams[numParamsWB]), routingCaliParamConfig->GetParamMins(), sizeof(float) * numParamsR);
+    memcpy(&(maxParams[numParamsWB]), routingCaliParamConfig->GetParamMaxs(), sizeof(float) * numParamsR);
+  }
+  
+  // Copy snow parameters
+  if (numParamsS > 0) {
+    memcpy(&(minParams[numParamsWB + numParamsR]), snowCaliParamConfig->GetParamMins(), sizeof(float) * numParamsS);
+    memcpy(&(maxParams[numParamsWB + numParamsR]), snowCaliParamConfig->GetParamMaxs(), sizeof(float) * numParamsS);
+  }
+  
+  // Copy lake parameters
+  if (numParamsL > 0) {
+    memcpy(&(minParams[numParamsWB + numParamsR + numParamsS]), lakeCaliParamConfig->GetParamMins(), sizeof(float) * numParamsL);
+    memcpy(&(maxParams[numParamsWB + numParamsR + numParamsS]), lakeCaliParamConfig->GetParamMaxs(), sizeof(float) * numParamsL);
+  }
   goal = objectiveGoals[caliParamConfig->GetObjFunc()];
 
   // Configurable Parameters

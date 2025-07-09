@@ -7,6 +7,7 @@
 #define ADDPARAMHYMOD(a, b)
 #define ADDPARAMSAC(a, b)
 #define ADDPARAMHP(a, b)
+#define ADDPARAMLAKE(a, b)
 #define ADDROUTE(a, b)
 #define ADDPARAMLINEAR(a, b)
 #define ADDPARAMKINEMATIC(a, b)
@@ -15,7 +16,6 @@
 #define ADDINUNDATION(a, b)
 #define ADDPARAMSI(a, b)
 #define ADDPARAMVCI(a, b)
-#define ADDPARAMLAKE(a, b)
 
 enum RUNSTYLE {
   STYLE_SIMU,
@@ -87,6 +87,16 @@ enum HP_PARAMS {
 #define ADDPARAMHP(a, b)
 
   PARAM_HP_QTY,
+};
+
+enum LAKE_PARAMS {
+#undef ADDPARAMLAKE
+#define ADDPARAMLAKE(a, b) PARAM_LAKE_##b,
+#include "Models.tbl"
+#undef ADDPARAMLAKE
+#define ADDPARAMLAKE(a, b)
+
+  PARAM_LAKE_QTY,
 };
 
 enum ROUTES {
@@ -169,16 +179,6 @@ enum VCI_PARAMS {
   PARAM_VCI_QTY,
 };
 
-enum LAKE_PARAMS {
-#undef ADDPARAMLAKE
-#define ADDPARAMLAKE(a, b) PARAM_LAKE_##b,
-#include "Models.tbl"
-#undef ADDPARAMLAKE
-#define ADDPARAMLAKE(a, b)
-
-  PARAM_LAKE_QTY,
-};
-
 extern const char *runStyleStrings[];
 extern const char *modelStrings[];
 extern const char *modelParamSetStrings[];
@@ -209,7 +209,6 @@ extern const char **inundationParamGridStrings[];
 extern const int numInundationParams[];
 
 extern const char *lakeStrings[];
-extern const char *lakeParamSetStrings[];
 extern const char *lakeCaliParamStrings[];
 extern const char **lakeParamStrings[];
 extern const char **lakeParamGridStrings[];

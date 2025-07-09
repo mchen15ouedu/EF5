@@ -17,7 +17,8 @@ public:
   void Initialize(CaliParamConfigSection *caliParamConfigNew,
                   RoutingCaliParamConfigSection *routingCaliParamConfigNew,
                   SnowCaliParamConfigSection *snowCaliParamConfigNew,
-                  int numParamsWBNew, int numParamsRNew, int numParamsSNew,
+                  LakeCaliParamConfigSection *lakeCaliParamConfigNew,
+                  int numParamsWBNew, int numParamsRNew, int numParamsSNew, int numParamsLNew,
                   Simulator *simNew);
   void CalibrateParams();
   void WriteOutput(char *outputFile, MODELS model, ROUTES route);

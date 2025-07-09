@@ -4,37 +4,97 @@ DDM = data/ddm.tif
 FAM = data/fam.tif
 Projection = EPSG:4326
 
-[LAKE Reservoir1]
-Lat = 35.5
-Lon = -97.8
-Area = 100000         ; user-defined, in m²
-ThVolume = 500000    ; user-defined, in m³
-
-[LAKEINLET Reservoir1]
-Lat = 35.55
-Lon = -97.85
-
-[LAKEINLET Reservoir1]
-Lat = 35.60
-Lon = -97.90
-
-[BASIN]
-Name = RedRiver
-Lake = Reservoir1
-Gauge = Gauge1
-DamQ = data/engineered_discharge.csv
-
-[TASK]
-Name = SimulationWithLake
+# Lake Configuration Section
+# Enable lake module for storage-based outflow calculation with state saving
+[TASK SimulationWithLake]
 Model = CREST
 Basin = RedRiver
 Gauge = Gauge1
 StartDate = 2024-01-01
 EndDate = 2024-12-31
+TimeStep = 1H
 LakeModule = true
+State = ./states
+StateTime = 20240101_00
+SaveStates = true
 
-# Example engineered_discharge.csv:
-# time,Reservoir1
-# 20240101-000000,100.0
-# 20240101-010000,110.0
-# 20240101-020000,120.0 
+# Example: Direct lake definition in control file (alternative to lakes.csv)
+[LAKE Reservoir1]
+Lat = 35.5
+Lon = -97.8
+Area = 0.1         ; in km² (converted to m² internally)
+ThVolume = 0.5     ; in km³ (converted to m³ internally)
+Klake = 24.0       ; retention constant in hours
+
+# Basin configuration with lake reference
+[BASIN RedRiver]
+Gauge = Gauge1
+lake = Reservoir1  ; Reference the lake defined above
+
+# Basin configuration with lake CSV support
+[BASIN RedRiver]
+Gauge = Gauge1
+# Lake CSV file (supports multiple formats, case insensitive):
+# lakes_csv = lakes.csv                    ; new format
+# lakelistfile = lakes.csv                 ; legacy format
+# LakeListFile = lakes.csv                 ; legacy format (case insensitive)
+LakeListFile = lakes.csv
+
+# Engineered discharge file (supports multiple formats, case insensitive):
+# engineered_discharge_csv = engineered_discharge.csv  ; new format
+# lakeoutflowfile = engineered_discharge.csv          ; legacy format
+# DamQ = engineered_discharge.csv                     ; preferred format
+DamQ = engineered_discharge.csv
+
+# Lake calibration parameter set (for calibration runs)
+# Correct section name: lakecaliparams (generated from Models.tbl)
+[lakecaliparams lake_calibration_example]
+LakeName = Lake1
+klake = 6.0,72.0  ; min,max values only (no initial value needed)
+
+# Example lakes.csv format:
+# name,lat,lon,th_volume,area,klake
+# Lake1,45.123,-122.456,1.2,50.0,24.0
+# Lake2,45.234,-122.567,0.8,30.0,48.0
+# Reservoir1,45.345,-122.678,2.5,100.0,12.0
+
+# Example engineered_discharge.csv format:
+# timestamp,Lake1,Lake2,Reservoir1
+# 20240101-000000,100.0,50.0,200.0
+# 20240101-010000,110.0,55.0,210.0
+# 20240101-020000,120.0,60.0,220.0
+
+# Lake Module Features:
+# 1. Storage-based overflow when storage > th_volume
+# 2. Linear reservoir outflow when storage <= th_volume
+# 3. Engineered discharge override when DamQ file is provided
+# 4. Per-lake calibration of klake parameter
+# 5. Water balance including precipitation and evaporation
+# 6. State saving/loading for lake storage and outflow
+# 7. Grid-based state management for distributed simulations
+# 8. Full integration with EF5's DREAM calibration system
+
+# Configuration Notes:
+# - All key names are case insensitive (except section names and file paths)
+# - Lake CSV reading supports both lakes_csv and lakelistfile keys
+# - Engineered discharge supports engineered_discharge_csv, lakeoutflowfile, and DamQ keys
+# - Lake calibration uses lakecaliparams section (generated from Models.tbl)
+# - Lake parameters are defined in the lakes.csv file (klake column)
+
+# Precipitation configuration
+[PRECIP sample_precip]
+TYPE GRIDDED
+PATH "./precip"
+SUFFIX ".tif"
+MISSING -9999
+CONVERT 1.0
+UNIT_TIME 1H
+
+# PET configuration
+[PET sample_pet]
+TYPE GRIDDED
+PATH "./pet"
+SUFFIX ".tif"
+MISSING -9999
+CONVERT 1.0
+UNIT_TIME 1H 

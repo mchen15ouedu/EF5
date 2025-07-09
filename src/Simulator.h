@@ -14,9 +14,9 @@
 #include "TaskConfigSection.h"
 #include "TempConfigSection.h"
 #include "TempReader.h"
-#include "LakeConfigSection.h"
 #include "LakeModel.h"
-#include <map>
+#include "LakeMap.h"
+#include "InletConfigSection.h"
 
 class Simulator {
 public:
@@ -38,11 +38,9 @@ private:
   bool InitializeSimu(TaskConfigSection *task);
   bool InitializeCali(TaskConfigSection *task);
   bool InitializeGridParams(TaskConfigSection *task);
-  bool InitializeLakes(TaskConfigSection *task);
 
   void SimulateDistributed(bool trackPeaks);
   void SimulateLumped();
-  void UpdateLakeOutflows(float stepHours);
 
   float GetNumSimulatedYears();
   int LoadForcings(PrecipReader *precipReader, PETReader *petReader,
@@ -63,6 +61,8 @@ private:
                            float moderateSD, float major, float majorSD);
   float CalcProb(float discharge, float mean, float sd);
 
+
+
   // These guys are the basic variables
   TaskConfigSection *task;
   GridNodeVec nodes;
@@ -72,6 +72,7 @@ private:
   SnowModel *sModel;
   InundationModel *iModel;
   GaugeMap gaugeMap;
+  LakeMap lakeMap;
   PrecipConfigSection *precipSec, *qpfSec;
   PETConfigSection *petSec;
   TempConfigSection *tempSec, *tempFSec;
@@ -83,6 +84,8 @@ private:
       *paramSettingsSnow;
   std::map<GaugeConfigSection *, float *> fullParamSettingsInundation,
       *paramSettingsInundation;
+  std::map<GaugeConfigSection *, float *> fullParamSettingsLake,
+      *paramSettingsLake;
   TimeUnit *timeStep, *timeStepSR, *timeStepLR, *timeStepPrecip, *timeStepQPF,
       *timeStepPET, *timeStepTemp, *timeStepTempF;
   float precipConvert, qpfConvert, petConvert, timeStepHours, timeStepHoursLR;
@@ -94,8 +97,11 @@ private:
       currentTimeText, currentTimeTextOutput;
   std::vector<float> currentFF, currentSF, currentBF, currentQ, avgPrecip, avgPET, avgSWE,
       currentSWE, avgT, avgSM,avgGW, avgFF, avgSF, avgBF, currentDepth;
+  std::vector<float> currentLakeVolume; // Lake volume for output
+  std::vector<LakeModelImpl*> lakeModels; // All lake models for inflow calculation
+  std::vector<InletConfigSection*> inlets; // All inlet configurations
   std::vector<FloatGrid *> paramGrids, paramGridsRoute, paramGridsSnow,
-      paramGridsInundation;
+      paramGridsInundation, paramGridsLake;
   bool hasQPF, hasTempF, wantsDA;
   bool inLR;
   std::vector<bool> gaugesUsed;
@@ -136,16 +142,11 @@ private:
   std::vector<WaterBalanceModel *> caliWBModels;
   std::vector<RoutingModel *> caliRModels;
   std::vector<SnowModel *> caliSModels;
+  std::vector<LakeModelImpl *> caliLModels;
   std::vector<float *> caliWBCurrentParams, caliRCurrentParams,
       caliSCurrentParams, caliLCurrentParams;
   std::vector<std::map<GaugeConfigSection *, float *> > caliWBFullParamSettings,
       caliRFullParamSettings, caliSFullParamSettings, caliLFullParamSettings;
-
-  // Lake-related variables
-  std::map<std::string, FILE*> lakeOutputFiles;
-  std::vector<LakeModel*> lakeModels;
-  std::vector<float> lakeOutflows; // Lake outflow rates for each lake
-  std::vector<int> lakeNodeIndices; // Grid node indices where lakes are located
 };
 
 #endif

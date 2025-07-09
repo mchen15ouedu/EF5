@@ -1,26 +1,44 @@
-[BASIN TestBasin]
-Gauge=test_gauge
-LakeListFile=lakes.csv
-DamQ=engineered_discharge.csv
+# Sample EF5 Control File with Lake Calibration and State Saving
+# This example shows how to calibrate lake parameters with state saving capability
+
+[BASIC]
+DEM = data/dem.tif
+DDM = data/ddm.tif
+FAM = data/fam.tif
+Projection = EPSG:4326
+
+[BASIN CalibrationBasin]
+LakeListFile = data/lakes.csv
+Gauge = CalibrationGauge
 
 [TASK LakeCalibration]
-Model=crest
-Routing=linear
-Snow=snow17
-Inundation=simpleinundation
-Style=cali_dream
-StartDate=2010-01-01 00:00:00
-EndDate=2010-12-31 23:59:59
-TimeStep=1h
-WarmupDays=30
-Basin=TestBasin
-Gauge=test_gauge
-ObjectiveFunction=nse
-ObjectiveGoal=minimize
+Model = CREST
+Basin = CalibrationBasin
+Gauge = CalibrationGauge
+StartDate = 2020-01-01
+EndDate = 2020-12-31
+TimeStep = 1H
+LakeModule = true
+Style = CALI_DREAM
+State = ./states
+StateTime = 20200601_00
+SaveStates = true
 
-[LAKECALIPARAMS lake_calibration]
-LakeName=Lake1
-klake=0.1,100.0
+# Lake calibration parameter set
+[LAKE_CALI_PARAM lake_calibration]
+LakeName = Lake1
+klake = 1.0,100.0  ; min,max values (initial values come from lakes.csv)
 
-[EXECUTE]
-Task=LakeCalibration 
+# Lake Module Features with State Saving:
+# 1. Automatic state saving/loading for lake storage and outflow
+# 2. Grid-based state management for distributed simulations
+# 3. Restart capability from any saved state
+# 4. Integration with existing EF5 state system
+# 5. Backward compatibility with existing lake configurations
+# 6. State files: lake_storage_YYYYMMDD_HHUU.tif, lake_outflow_YYYYMMDD_HHUU.tif
+
+# Lake Module Configuration
+LakeModule=true
+
+# Lake Calibration Parameters (required for calibration runs when LakeModule=true)
+LakeCaliParam=default_lake_cali_params 

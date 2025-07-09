@@ -85,13 +85,20 @@ FloatGrid *ReadFloatTifGrid(const char *file, FloatGrid *incGrid) {
     return NULL;
   }
 
+  if (TIFFIsTiled(tif)) {
+    WARNING_LOGF("%s is an unsupported tiled GeoTiff", file);
+    GTIFFree(gtif);
+    XTIFFClose(tif);
+    return NULL;
+  }
+
   int width, height;
   TIFFGetField(tif, TIFFTAG_IMAGEWIDTH, &width);
   TIFFGetField(tif, TIFFTAG_IMAGELENGTH, &height);
 
   short tiepointsize, pixscalesize;
-  double *tiepoints;
-  double *pixscale;
+  double *tiepoints; //[6];
+  double *pixscale;  //[3];
   TIFFGetField(tif, TIFFTAG_GEOTIEPOINTS, &tiepointsize, &tiepoints);
   TIFFGetField(tif, TIFFTAG_GEOPIXELSCALE, &pixscalesize, &pixscale);
 
@@ -141,52 +148,10 @@ FloatGrid *ReadFloatTifGrid(const char *file, FloatGrid *incGrid) {
   GTIFKeyGet(gtif, GeogGeodeticDatumGeoKey, &grid->geodeticDatum, 0, 1);
   grid->geoSet = true;
 
-  // Handle both tiled and stripped GeoTIFFs
-  if (TIFFIsTiled(tif)) {
-    uint32_t tileWidth, tileHeight;
-    TIFFGetField(tif, TIFFTAG_TILEWIDTH, &tileWidth);
-    TIFFGetField(tif, TIFFTAG_TILELENGTH, &tileHeight);
-    
-    // Allocate a buffer for one tile
-    tdata_t buf = _TIFFmalloc(TIFFTileSize(tif));
-    if (!buf) {
-      WARNING_LOGF("Failed to allocate tile buffer for %s", file);
-      delete grid;
-      GTIFFree(gtif);
-      XTIFFClose(tif);
-      return NULL;
-    }
-
-    // Read tiles
-    for (uint32_t row = 0; row < (uint32_t)height; row += tileHeight) {
-      for (uint32_t col = 0; col < (uint32_t)width; col += tileWidth) {
-        if (TIFFReadTile(tif, buf, col, row, 0, 0) < 0) {
-          // If tile read fails, fill with noData
-          for (uint32_t y = row; y < row + tileHeight && y < (uint32_t)height; y++) {
-            for (uint32_t x = col; x < col + tileWidth && x < (uint32_t)width; x++) {
-              grid->data[y][x] = grid->noData;
-            }
-          }
-          continue;
-        }
-
-        // Copy tile data to grid
-        float* fbuf = (float*)buf;
-        for (uint32_t y = 0; y < tileHeight && (row + y) < (uint32_t)height; y++) {
-          for (uint32_t x = 0; x < tileWidth && (col + x) < (uint32_t)width; x++) {
-            grid->data[row + y][col + x] = fbuf[y * tileWidth + x];
-          }
-        }
-      }
-    }
-    _TIFFfree(buf);
-  } else {
-    // Original strip-based reading code
-    for (long i = 0; i < grid->numRows; i++) {
-      if (TIFFReadScanline(tif, grid->data[i], (unsigned int)i, 1) == -1) {
-        for (long j = 0; j < grid->numCols; j++) {
-          grid->data[i][j] = grid->noData;
-        }
+  for (long i = 0; i < grid->numRows; i++) {
+    if (TIFFReadScanline(tif, grid->data[i], (unsigned int)i, 1) == -1) {
+      for (long j = 0; j < grid->numCols; j++) {
+        grid->data[i][j] = grid->noData;
       }
     }
   }

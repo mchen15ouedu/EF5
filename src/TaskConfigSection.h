@@ -8,6 +8,8 @@
 #include "GaugeConfigSection.h"
 #include "InundationCaliParamConfigSection.h"
 #include "InundationParamSetConfigSection.h"
+#include "LakeCaliParamConfigSection.h"
+
 #include "Model.h"
 #include "PETConfigSection.h"
 #include "ParamSetConfigSection.h"
@@ -68,7 +70,9 @@ public:
   SnowCaliParamConfigSection *GetSnowCaliParamSec();
   InundationParamSetConfigSection *GetInundationParamsSec();
   InundationCaliParamConfigSection *GetInundationCaliParamSec();
+
   LakeCaliParamConfigSection *GetLakeCaliParamSec();
+  bool IsLakeModuleEnabled() { return lakeModuleEnabled; }
   RUNSTYLE GetRunStyle();
   MODELS GetModel();
   ROUTES GetRouting();
@@ -80,9 +84,6 @@ public:
   CONFIG_SEC_RET ProcessKeyValue(char *name, char *value);
   CONFIG_SEC_RET ValidateSection();
   int GetGriddedOutputs() { return griddedOutputs; }
-  void SetLakeModuleEnabled(bool enabled) { lakeModuleEnabled = enabled; }
-  bool IsLakeModuleEnabled() const { return lakeModuleEnabled; }
-  std::string GetLakeOutflowFile() const { return lakeOutflowFile; }
   
 
   static bool IsDuplicate(char *name);
@@ -95,6 +96,7 @@ private:
   bool snowParamsSet, snowCaliParamSet, snowSet, tempSet, tempFSet;
   bool inundationParamsSet, inundationCaliParamSet, inundationSet;
   bool lakeCaliParamSet;
+  bool lakeModuleSet, lakeModuleEnabled;
   bool timeBeginLRSet, timestepLRSet;
   char output[CONFIG_MAX_LEN], state[CONFIG_MAX_LEN];
   char name[CONFIG_MAX_LEN];
@@ -122,6 +124,7 @@ private:
   SnowCaliParamConfigSection *caliParamSnow;
   InundationParamSetConfigSection *paramsInundation;
   InundationCaliParamConfigSection *caliParamInundation;
+
   LakeCaliParamConfigSection *caliParamLake;
   GaugeConfigSection *defaultGauge;
   TimeUnit timeStep;
@@ -133,8 +136,6 @@ private:
   TimeVar timeState;
   TimeVar timeBeginLR;
   int griddedOutputs;
-  bool lakeModuleEnabled = false;
-  std::string lakeOutflowFile;
 
   bool LoadGriddedOutputs(char *value);
   std::vector<TimeVar*> timeBegins;

@@ -7,9 +7,6 @@
 #include "BasicGrids.h"
 #include "CRESTModel.h"
 #include "CRESTPhysModel.h"
-#include "LakeModel.h"
-#include "LakeMap.h"
-#include "InletConfigSection.h"
 #include "GridWriterFull.h"
 #include "GriddedOutput.h"
 #include "HPModel.h"
@@ -175,9 +172,6 @@ bool Simulator::InitializeBasic(TaskConfigSection *task) {
     paramSettingsInundation = NULL;
   }
 
-  // Lake parameters are now handled through CSV file, not parameter sets
-  paramSettingsLake = NULL;
-
   // Initialize gridded parameter settings
   if (!InitializeGridParams(task)) {
     return false;
@@ -216,29 +210,12 @@ bool Simulator::InitializeBasic(TaskConfigSection *task) {
     }
   }
 
-  // Lake parameters are now handled through CSV file, not parameter sets
-
   // Carve the basin to find which nodes we're modeling on
-  // If using states, try to load gauge relationships first and skip building them
-  bool skipGaugeRelationships = false;
-  if (task->UseStates()) {
-    // Try to load gauge relationships from state file
-    if (gaugeMap.LoadGaugeRelationships(task->GetTimeState(), task->GetState())) {
-      skipGaugeRelationships = true;
-      printf("Info: Gauge relationships loaded from state file, skipping analysis.\n");
-    } else {
-      printf("Info: No gauge relationships state file found, will build from scratch.\n");
-    }
-  }
-  
   CarveBasin(task->GetBasinSec(), &nodes, paramSettings, &fullParamSettings,
              &gaugeMap, defaultParams, paramSettingsRoute,
              &fullParamSettingsRoute, defaultParamsRoute, paramSettingsSnow,
              &fullParamSettingsSnow, defaultParamsSnow, paramSettingsInundation,
-             &fullParamSettingsInundation, defaultParamsInundation, skipGaugeRelationships);
-
-  // Carve lake parameters from lake data to grid nodes
-  CarveLakeParameters(task->GetBasinSec(), &nodes);
+             &fullParamSettingsInundation, defaultParamsInundation);
 
   // Ensure we actually have at least one node to work with!
   if (nodes.size() == 0) {
@@ -263,25 +240,6 @@ bool Simulator::InitializeBasic(TaskConfigSection *task) {
   case MODEL_HP:
     wbModel = new HPModel();
     break;
-  case MODEL_LAKE: {
-    // Check if lakes are defined in basin configuration
-    std::vector<LakeInfo> *basinLakes = task->GetBasinSec()->GetLakes();
-    std::map<std::string, double> *basinEngineeredDischarge = task->GetBasinSec()->GetEngineeredDischarge();
-    
-    if (basinLakes && !basinLakes->empty()) {
-      // Use the first lake from the basin configuration
-      wbModel = new LakeModelImpl(basinLakes->at(0), false, basinEngineeredDischarge);
-      INFO_LOGF("Created lake model for lake: %s", basinLakes->at(0).name.c_str());
-    } else {
-      // Fall back to default lake info
-      wbModel = new LakeModelImpl(LakeInfo(), false, NULL);
-      INFO_LOGF("%s", "Created default lake model (no lakes defined in basin)");
-    }
-    break;
-  }
-  case MODEL_QTY:
-    ERROR_LOG("MODEL_QTY is not a valid model selection!");
-    return false;
   default:
     ERROR_LOG("Unsupported Water Balance Model!!");
     return false;
@@ -352,49 +310,6 @@ bool Simulator::InitializeBasic(TaskConfigSection *task) {
     gaugesUsed[i] = false;
   }
 
-  // Initialize lake models if lake module is enabled (for non-lake water balance models)
-  if (task->IsLakeModuleEnabled() && task->GetModel() != MODEL_LAKE) {
-    lakeModels.clear();
-    if (task->GetBasinSec()->GetLakes() && !task->GetBasinSec()->GetLakes()->empty()) {
-      // Use lakes from CSV file for additional lake processing
-      std::vector<LakeInfo> *lakes = task->GetBasinSec()->GetLakes();
-      std::map<std::string, double> *basinEngineeredDischarge = task->GetBasinSec()->GetEngineeredDischarge();
-      
-      for (size_t i = 0; i < lakes->size(); ++i) {
-        LakeModelImpl* lake = new LakeModelImpl(lakes->at(i), false, basinEngineeredDischarge);
-        lakeModels.push_back(lake);
-      }
-    }
-    
-    // Initialize LakeMap for additional lakes
-    if (lakeModels.size() > 0) {
-      lakeMap.Initialize(&lakeModels);
-      lakeMap.FindLakeLocations();
-      
-      // If using states, try to load lake relationships first and skip building them
-      bool skipLakeRelationships = false;
-      if (task->UseStates()) {
-        // Try to load lake relationships from state file
-        if (lakeMap.LoadLakeRelationships(task->GetTimeState(), task->GetState())) {
-          skipLakeRelationships = true;
-          printf("Info: Lake relationships loaded from state file, skipping analysis.\n");
-        } else {
-          printf("Info: Lake relationships will be rebuilt from scratch.\n");
-        }
-      }
-      
-      // Only build lake relationships if not loaded from state
-      if (!skipLakeRelationships) {
-        lakeMap.FindUpstreamNeighbors();
-      }
-      
-      // Initialize inlets if any are configured
-      if (inlets.size() > 0) {
-        lakeMap.InitializeInlets(&inlets);
-      }
-    }
-  }
-
   return true;
 }
 
@@ -424,9 +339,6 @@ bool Simulator::InitializeSimu(TaskConfigSection *task) {
   currentPrecipSimu.resize(nodes.size());
   currentPETSimu.resize(nodes.size());
   currentTempSimu.resize(nodes.size());
-  if (task->IsLakeModuleEnabled()) {
-    currentLakeVolume.resize(nodes.size());
-  }
   if (!wbModel->IsLumped()) {
     if (task->GetStdGrid()[0] && task->GetAvgGrid()[0] &&
         task->GetScGrid()[0]) {
@@ -482,9 +394,6 @@ bool Simulator::InitializeSimu(TaskConfigSection *task) {
         }
         if (outputRP) {
           fprintf(gaugeOutputs[i], "%s", ",Return Period(y)");
-        }
-        if (task->IsLakeModuleEnabled()) {
-          fprintf(gaugeOutputs[i], "%s", ",Lake_Vol(m^3)");
         }
         fprintf(gaugeOutputs[i], "%s", "\n");
 
@@ -551,12 +460,6 @@ bool Simulator::InitializeCali(TaskConfigSection *task) {
     numSParams = 0;
   }
 
-  if (task->IsLakeModuleEnabled() && task->GetLakeCaliParamSec()) {
-    numLParams = numLakeParams[0]; // Assuming lake parameters are the same for all lake types
-  } else {
-    numLParams = 0;
-  }
-
   if (timeStepLR) {
     ERROR_LOGF("%s", "Long range time steps do not work in calibration mode!");
     return false;
@@ -597,9 +500,6 @@ bool Simulator::InitializeCali(TaskConfigSection *task) {
     }
     caliSParams = fullParamSettingsSnow[caliGauge];
   }
-
-  // Lake parameters are now handled through CSV file, not parameter sets
-  caliLParams = NULL;
 
   caliGauge->LoadTS();
 
@@ -652,15 +552,12 @@ bool Simulator::InitializeCali(TaskConfigSection *task) {
   caliWBModels.resize(maxThreads);
   caliRModels.resize(maxThreads);
   caliSModels.resize(maxThreads);
-  caliLModels.resize(maxThreads);
   caliWBFullParamSettings.resize(maxThreads);
   caliWBCurrentParams.resize(maxThreads);
   caliRFullParamSettings.resize(maxThreads);
   caliRCurrentParams.resize(maxThreads);
   caliSFullParamSettings.resize(maxThreads);
   caliSCurrentParams.resize(maxThreads);
-  caliLFullParamSettings.resize(maxThreads);
-  caliLCurrentParams.resize(maxThreads);
   for (int i = 0; i < maxThreads; i++) {
     switch (task->GetModel()) {
     case MODEL_CREST:
@@ -712,13 +609,6 @@ bool Simulator::InitializeCali(TaskConfigSection *task) {
       return false;
     }
 
-    // Create the appropriate lake model
-    if (task->IsLakeModuleEnabled()) {
-              caliLModels[i] = new LakeModelImpl(LakeInfo(), false, NULL);
-    } else {
-      caliLModels[i] = NULL;
-    }
-
     caliWBCurrentParams[i] = new float[numWBParams];
 
     for (std::map<GaugeConfigSection *, float *>::iterator itr =
@@ -757,9 +647,6 @@ bool Simulator::InitializeCali(TaskConfigSection *task) {
         }
       }
     }
-
-    // Lake parameters are now handled through CSV file, not parameter sets
-    caliLCurrentParams[i] = NULL;
   }
 #endif
 
@@ -1098,12 +985,12 @@ void Simulator::SaveTSOutput() {
     GaugeConfigSection *gauge = gauges->at(i);
     if (gaugeOutputs[i]) {
       if (std::isfinite(currentQ[gauge->GetGridNodeIndex()])) {
-        fprintf(gaugeOutputs[i], "%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.4f,%.4f,%.4f",
+        fprintf(gaugeOutputs[i], "%s,%.5f,%.5f,%.2f,%.2f,%.2f,%.2f,%.4f,%.4f,%.4f",
               currentTimeText.GetName(), currentQ[gauge->GetGridNodeIndex()],
               gauge->GetObserved(&currentTime), avgPrecip[i], avgPET[i],
               avgSM[i],  avgGW[i], avgFF[i] * 1000.0, avgSF[i] * 1000.0, avgBF[i]*1000.0);
       } else {
-        fprintf(gaugeOutputs[i], "%s,%.2f,nan,%.2f,%.2f,%.2f,%.2f,%.4f,%.4f,%.4f",
+        fprintf(gaugeOutputs[i], "%s,%.5f,nan,%.2f,%.2f,%.2f,%.2f,%.4f,%.4f,%.4f",
               currentTimeText.GetName(),
               gauge->GetObserved(&currentTime), avgPrecip[i], avgPET[i],
               avgSM[i], avgGW[i], avgFF[i] * 1000.0, avgSF[i] * 1000.0, avgBF[i]*1000.0);
@@ -1115,9 +1002,6 @@ void Simulator::SaveTSOutput() {
         fprintf(gaugeOutputs[i], ",%.2f",
                 GetReturnPeriod(currentQ[gauge->GetGridNodeIndex()],
                                 &(rpData[gauge->GetGridNodeIndex()])));
-      }
-      if (task->IsLakeModuleEnabled()) {
-        fprintf(gaugeOutputs[i], ",%.2f", currentLakeVolume[gauge->GetGridNodeIndex()]);
       }
       fprintf(gaugeOutputs[i], "%s", "\n");
     }
@@ -1408,9 +1292,6 @@ void Simulator::SimulateDistributed(bool trackPeaks) {
     iModel->InitializeModel(&nodes, &fullParamSettingsInundation,
                             &paramGridsInundation);
   }
-  if (task->GetModel() == MODEL_LAKE) {
-    wbModel->InitializeModel(&nodes, NULL, NULL);
-  }
   if (griddedOutputs != OG_NONE || trackPeaks || outputRP || saveStates) {
     gridWriter.Initialize();
   }
@@ -1421,19 +1302,6 @@ void Simulator::SimulateDistributed(bool trackPeaks) {
     }
     if (sModel) {
       sModel->InitializeStates(&currentTime, statePath);
-    }
-    if (task->GetModel() == MODEL_LAKE) {
-      wbModel->InitializeStates(&currentTime, statePath);
-    }
-    
-    // Initialize states for additional lake models (when using other water balance model besides CREST)
-    if (task->IsLakeModuleEnabled() && task->GetModel() != MODEL_LAKE) {
-      for (size_t l = 0; l < lakeModels.size(); ++l) {
-        LakeModelImpl* lake = lakeModels[l];
-        if (lake) {
-          lake->InitializeStates(&currentTime, statePath);
-        }
-      }
     }
   } else {
     for (size_t i = 0; i < currentFF.size(); i++) {
@@ -1523,25 +1391,6 @@ void Simulator::SimulateDistributed(bool trackPeaks) {
       }
     }
     // printf("Got here before executing water balance...\n"); done
-    
-    // Part 1: Vertical balance (P-E) for lakes before water balance
-    if (task->IsLakeModuleEnabled()) {
-      // Handle additional lakes (when using non-lake water balance model)
-      for (size_t l = 0; l < lakeModels.size(); ++l) {
-        LakeModelImpl* lake = lakeModels[l];
-        if (!lake) continue;
-        
-        // Apply vertical balance with current precipitation and PET
-        lake->ApplyVerticalBalance(timeStepHours, currentPrecip, &currentPETSimu);
-      }
-      
-      // Handle main lake model (when using MODEL_LAKE)
-      LakeModelImpl* mainLakeModel = dynamic_cast<LakeModelImpl*>(wbModel);
-      if (mainLakeModel) {
-        mainLakeModel->ApplyVerticalBalance(timeStepHours, currentPrecip, &currentPETSimu);
-      }
-    }
-    
     // Integrate the models for this timestep
     if (!preloadedForcings) {
       wbModel->WaterBalance(stepHoursReal, currentPrecip, &currentPETSimu,
@@ -1583,8 +1432,6 @@ void Simulator::SimulateDistributed(bool trackPeaks) {
     }
 
 
-
-
     if (rModel && wantsDA) {
       AssimilateData();
     }
@@ -1609,49 +1456,13 @@ void Simulator::SimulateDistributed(bool trackPeaks) {
         currentBF[i] = 0.0;
       }
     }
-    
-    // Part 2: Horizontal balance (inflow-outflow) for lakes after routing
-    if (task->IsLakeModuleEnabled()) {
-      // Handle additional lakes (when using non-lake water balance model)
-      for (size_t l = 0; l < lakeModels.size(); ++l) {
-        LakeModelImpl* lake = lakeModels[l];
-        if (!lake) continue;
-        
-        // Apply horizontal balance and update Q vector
-        lake->ApplyHorizontalBalance(timeStepHours, &currentQ, &nodes, &currentTime, &lakeMap);
-      }
-      
-      // Handle main lake model (when using MODEL_LAKE)
-      LakeModelImpl* mainLakeModel = dynamic_cast<LakeModelImpl*>(wbModel);
-      if (mainLakeModel) {
-        mainLakeModel->ApplyHorizontalBalance(timeStepHours, &currentQ, &nodes, &currentTime, &lakeMap);
-      }
-    }
     if (saveStates && stateTime == currentTime) {
-      // Save gauge relationships
-      gaugeMap.SaveGaugeRelationships(&currentTime, statePath);
-      
-      // Save lake relationships
-      if (task->IsLakeModuleEnabled()) {
-        lakeMap.SaveLakeRelationships(&currentTime, statePath);
-      }
-      
       wbModel->SaveStates(&currentTime, statePath, &gridWriter);
       if (rModel) {
         rModel->SaveStates(&currentTime, statePath, &gridWriter);
       }
       if (sModel) {
         sModel->SaveStates(&currentTime, statePath, &gridWriter);
-      }
-      
-      // Save states for additional lake models
-      if (task->IsLakeModuleEnabled()) {
-        for (size_t l = 0; l < lakeModels.size(); ++l) {
-          LakeModelImpl* lake = lakeModels[l];
-          if (lake) {
-            lake->SaveStates(&currentTime, statePath, &gridWriter);
-          }
-        }
       }
     }
 
@@ -1738,7 +1549,7 @@ void Simulator::SimulateDistributed(bool trackPeaks) {
         sprintf(buffer, "%s/q.%s.%s.tif", outputPath,
                 currentTimeTextOutput.GetName(), wbModel->GetName());
         for (size_t i = 0; i < currentQ.size(); i++) {
-          float val = floorf(currentQ[i] * 10.0f + 0.5f) / 10.0f;
+          float val = floorf(currentQ[i] * 10000.0f + 0.5f) / 100000.0f;
           currentDepth[i] = val;
         }
         gridWriter.WriteGrid(&nodes, &currentDepth, buffer, false);
@@ -1960,24 +1771,7 @@ void Simulator::SimulateDistributed(bool trackPeaks) {
 #endif
   fprintf(fp, "\n%s", "}");
   fclose(fp);
-
-  // Populate lake volume data for output if lake module is enabled
-  if (task->IsLakeModuleEnabled()) {
-    for (size_t i = 0; i < nodes.size(); i++) {
-      // Try to cast wbModel to LakeModelImpl to get storage
-      LakeModelImpl* lakeModel = dynamic_cast<LakeModelImpl*>(wbModel);
-      if (lakeModel) {
-        currentLakeVolume[i] = (float)lakeModel->GetStorage();
-      } else {
-        currentLakeVolume[i] = 0.0f; // Default if not a lake model
-      }
-    }
-  }
-
-
 }
-
-
 
 void Simulator::SimulateLumped() {
   PrecipReader precipReader;
@@ -2590,8 +2384,6 @@ bool Simulator::InitializeGridParams(TaskConfigSection *task) {
       }
     }
   }
-
-
 
   return true;
 }

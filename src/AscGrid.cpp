@@ -199,7 +199,7 @@ void WriteFloatAscGrid(const char *file, FloatGrid *grid) {
   fprintf(fileH, "xllcorner %f\n", grid->extent.left);
   fprintf(fileH, "yllcorner %f\n", grid->extent.bottom);
   fprintf(fileH, "cellsize %f\n", grid->cellSize);
-  fprintf(fileH, "NODATA_value %.08f\n", grid->noData);
+  fprintf(fileH, "NODATA_value %.02f\n", grid->noData);
 
   // Write out the data
   for (long row = 0; row < grid->numRows; row++) {
@@ -207,7 +207,7 @@ void WriteFloatAscGrid(const char *file, FloatGrid *grid) {
     for (long col = 0; col < grid->numCols; col++) {
       // 2019-04: output gridded surface runoff --------------------------------- 
       //fprintf(fileH, "%.05f%s", grid->data[row][col],
-      fprintf(fileH, "%.08f%s", grid->data[row][col],
+      fprintf(fileH, "%.02f%s", grid->data[row][col],
               (col == lastCol) ? "\n" : " ");
     }
   }

@@ -175,13 +175,15 @@ void LRRoute::InitializeParameters(
       FloatGrid *grid = paramGrids->at(paramI);
       if (grid && g_DEM->IsSpatialMatch(grid)) {
         if (grid->data[node->y][node->x] == 0) {
-          grid->data[node->y][node->x] = MIN_THRESHOLD;
+          grid->data[node->y][node->x] = 0.01;
         }
         cNode->params[paramI] *= grid->data[node->y][node->x];
       } else if (grid &&
                  grid->GetGridLoc(node->refLoc.x, node->refLoc.y, &pt)) {
         if (grid->data[pt.y][pt.x] == 0) {
-          grid->data[pt.y][pt.x] = MIN_THRESHOLD;
+          grid->data[pt.y][pt.x] = 0.01;
+          // printf("Using nodata value in param %s\n",
+          // modelParamStrings[MODEL_CREST][paramI]);
         }
         cNode->params[paramI] *= grid->data[pt.y][pt.x];
       }

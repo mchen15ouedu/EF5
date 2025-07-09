@@ -1,9 +1,8 @@
-# Sample EF5 Control File with Lake Outflow Integration
-# This example shows how to configure lakes with KW routing
-# Lakes use storage-based overflow (storage > th_volume) for natural outflow
+# Sample EF5 Control File with Lake Outflow Integration and State Saving
+# This example shows how to configure lakes with KW routing and state saving capability
 
 # Basic task configuration
-TASK "lake_example"
+[TASK lake_example]
 STYLE CALI_DREAM
 MODEL HP
 ROUTING KW
@@ -12,55 +11,78 @@ TIMESTEP 1H
 TIME_BEGIN 20200101_00
 TIME_END 20200131_23
 TIME_WARMEND 20200107_23
+LakeModule = true
+State = "./states"
+StateTime = 20200115_00
+SaveStates = true
 
 # Basin and forcing data
-BASIN "sample_basin"
+[BASIN sample_basin]
 PRECIP "sample_precip"
 PET "sample_pet"
 
 # Parameter sets
-PARAM_SET "sample_params"
+[PARAM_SET sample_params]
 ROUTING_PARAM_SET "sample_routing_params"
 
 # Calibration parameter sets
-CALI_PARAM "sample_cali_params"
+[CALI_PARAM sample_cali_params]
 ROUTING_CALI_PARAM "sample_routing_cali_params"
 LAKE_CALI_PARAM "lake_cali_example"
 
-# Lake configuration
-# LAKEMODULE true - enables storage-based lake outflow
+# Lake configuration - Method 1: CSV File Reading
+# LAKEMODULE true - enables storage-based lake outflow with state saving
 # LAKEOUTFLOWFILE - optional engineered discharge file
 LAKEMODULE true
 LAKEOUTFLOWFILE "engineered_discharge.csv"
 
+# Alternative Method 2: Individual Lake Sections
+# [LAKE Reservoir1]
+# Lat = 35.5
+# Lon = -97.8
+# Area = 0.1         ; km² (converted to m² internally)
+# ThVolume = 0.5    ; km³ (converted to m³ internally)
+# Klake = 24.0      ; hours
+
 # Output configuration
 OUTPUT_GRIDS "Q|SM|GW|PRECIP|PET"
 
-# Basin configuration
-BASIN "sample_basin"
+# Basin configuration - Method 1: CSV File Reading
+[BASIN sample_basin]
 DEM "dem.tif"
 FLOWDIR "flowdir.tif"
 FLOWACC "flowacc.tif"
 GAUGES "gauges.csv"
+lakes_csv = "lakes.csv"  ; Read lakes from CSV file
+
+# Alternative Method 2: Individual Lake References
+# [BASIN sample_basin]
+# DEM "dem.tif"
+# FLOWDIR "flowdir.tif"
+# FLOWACC "flowacc.tif"
+# GAUGES "gauges.csv"
+# lake = Reservoir1  ; Reference lake defined in [LAKE] section
 
 # Precipitation configuration
-PRECIP "sample_precip"
+[PRECIP sample_precip]
 TYPE MRMS
 PATH "./precip"
 SUFFIX ".tif"
 MISSING -9999
 CONVERT 1.0
+UNIT_TIME 1H
 
 # PET configuration
-PET "sample_pet"
+[PET sample_pet]
 TYPE GRIDDED
 PATH "./pet"
 SUFFIX ".tif"
 MISSING -9999
 CONVERT 1.0
+UNIT_TIME 1H
 
 # Parameter set configuration
-PARAM_SET "sample_params"
+[PARAM_SET sample_params]
 IM 0.001
 KE 0.1
 CE 0.3
@@ -70,11 +92,24 @@ CI 0.9
 CG 0.99
 
 # Routing parameter set configuration
-ROUTING_PARAM_SET "sample_routing_params"
+[ROUTING_PARAM_SET sample_routing_params]
 UNDER 0.1
 LEAKI 0.5
 TH 1000
 ISU 0.0
 ALPHA 3.49
 BETA 0.6
-ALPHA0 1.0 
+ALPHA0 1.0
+
+# Lake calibration parameter configuration
+[LAKE_CALI_PARAM lake_cali_example]
+LakeName = Lake1
+klake = 1.0,100.0  ; min,max values (initial values come from lakes.csv)
+
+# Lake Module Features with State Saving:
+# 1. Automatic state saving/loading for lake storage and outflow
+# 2. Grid-based state management for distributed simulations
+# 3. Restart capability from any saved state
+# 4. Integration with existing EF5 state system
+# 5. Backward compatibility with existing lake configurations
+# 6. State files: lake_storage_YYYYMMDD_HHUU.tif, lake_outflow_YYYYMMDD_HHUU.tif 

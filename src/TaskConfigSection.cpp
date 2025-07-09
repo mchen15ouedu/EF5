@@ -1,5 +1,7 @@
 #include "TaskConfigSection.h"
 #include "GriddedOutput.h"
+#include "LakeCaliParamConfigSection.h"
+
 #include "Messages.h"
 #include <cstdio>
 #include <cstdlib>
@@ -26,6 +28,10 @@ TaskConfigSection::TaskConfigSection(const char *nameVal) {
   snowParamsSet = false;
   inundationParamsSet = false;
 
+  lakeCaliParamSet = false;
+  lakeModuleSet = false;
+  lakeModuleEnabled = false;
+
   timestepSet = false;
   timestepLRSet = false;
   timeStateSet = false;
@@ -41,6 +47,8 @@ TaskConfigSection::TaskConfigSection(const char *nameVal) {
   defaultGauge = NULL;
   qpf = NULL;
   tempf = NULL;
+
+  caliParamLake = NULL;
   stdGrid[0] = 0;
   avgGrid[0] = 0;
   scGrid[0] = 0;
@@ -170,6 +178,11 @@ TaskConfigSection::GetInundationCaliParamSec() {
   return caliParamInundation;
 }
 
+
+LakeCaliParamConfigSection *TaskConfigSection::GetLakeCaliParamSec() {
+  return caliParamLake;
+}
+
 RUNSTYLE TaskConfigSection::GetRunStyle() { return style; }
 
 MODELS TaskConfigSection::GetModel() { return model; }
@@ -182,10 +195,6 @@ INUNDATIONS TaskConfigSection::GetInundation() { return inundation; }
 
 GaugeConfigSection *TaskConfigSection::GetDefaultGauge() {
   return defaultGauge;
-}
-
-LakeCaliParamConfigSection *TaskConfigSection::GetLakeCaliParamSec() {
-  return caliParamLake;
 }
 
 CONFIG_SEC_RET TaskConfigSection::ProcessKeyValue(char *name, char *value) {
@@ -546,6 +555,8 @@ CONFIG_SEC_RET TaskConfigSection::ProcessKeyValue(char *name, char *value) {
     caliParamInundation = itr->second;
     inundationCaliParamSet = true;
   } else if (!strcasecmp(name, "lake_cali_param")) {
+    // Lake calibration parameters are independent of the main water balance model
+    // They can be used with any model when LakeModule is enabled
     TOLOWER(value);
     std::map<std::string, LakeCaliParamConfigSection *>::iterator itr =
         g_lakeCaliParamConfigs.find(value);
@@ -555,12 +566,16 @@ CONFIG_SEC_RET TaskConfigSection::ProcessKeyValue(char *name, char *value) {
     }
     caliParamLake = itr->second;
     lakeCaliParamSet = true;
-  } else if (strcmp(name, "LakeModule") == 0) {
-    lakeModuleEnabled = (strcmp(value, "true") == 0 || strcmp(value, "1") == 0);
-    return VALID_RESULT;
-  } else if (strcmp(name, "LakeOutflowFile") == 0) {
-    lakeOutflowFile = value;
-    return VALID_RESULT;
+  } else if (!strcasecmp(name, "lakemodule")) {
+    if (!strcasecmp(value, "true")) {
+      lakeModuleEnabled = true;
+    } else if (!strcasecmp(value, "false")) {
+      lakeModuleEnabled = false;
+    } else {
+      ERROR_LOGF("Invalid LakeModule value \"%s\"! Must be 'true' or 'false'", value);
+      return INVALID_RESULT;
+    }
+    lakeModuleSet = true;
   } else {
     ERROR_LOGF("Unknown task configuration option \"%s\"", name);
     return INVALID_RESULT;
@@ -652,24 +667,22 @@ CONFIG_SEC_RET TaskConfigSection::ValidateSection() {
       ERROR_LOG("The calibration snow parameter set was not specified");
       return INVALID_RESULT;
     }
-
     if (lakeModuleEnabled && !lakeCaliParamSet) {
-      ERROR_LOG("The calibration lake parameter set was not specified but lake module is enabled");
-      return INVALID_RESULT;
-    }
-
-    if (!lakeModuleEnabled && lakeCaliParamSet) {
-      ERROR_LOG("Lake calibration parameters were specified but lake module is disabled");
+      ERROR_LOG("The calibration lake parameter set was not specified");
       return INVALID_RESULT;
     }
 
     char *gaugeWB = caliParam->GetGauge()->GetName();
     char *gaugeR = caliParamRouting->GetGauge()->GetName();
     char *gaugeS = NULL;
+    char *gaugeL = NULL;
     if (snowSet) {
       gaugeS = caliParamSnow->GetGauge()->GetName();
     }
-    bool foundWB = false, foundR = false, foundS = false;
+    if (lakeModuleEnabled) {
+      gaugeL = caliParamLake->GetGauge()->GetName();
+    }
+    bool foundWB = false, foundR = false, foundS = false, foundL = false;
     std::vector<GaugeConfigSection *> *bGauges = basin->GetGauges();
     for (size_t i = 0; i < bGauges->size(); i++) {
       if (!strcasecmp(gaugeWB, bGauges->at(i)->GetName())) {
@@ -680,6 +693,9 @@ CONFIG_SEC_RET TaskConfigSection::ValidateSection() {
       }
       if (snowSet && !strcasecmp(gaugeS, bGauges->at(i)->GetName())) {
         foundS = true;
+      }
+      if (lakeModuleEnabled && !strcasecmp(gaugeL, bGauges->at(i)->GetName())) {
+        foundL = true;
       }
     }
 
@@ -698,10 +714,39 @@ CONFIG_SEC_RET TaskConfigSection::ValidateSection() {
                 "basin!");
       return INVALID_RESULT;
     }
+    if (lakeModuleEnabled && !foundL) {
+      ERROR_LOG("The calibration gauge (lake cali param) was not found in the "
+                "basin!");
+      return INVALID_RESULT;
+    }
   }
 
   if (!timeWarmEndSet) {
     timeWarmEnd = timeBegin;
+  }
+
+  // Lake module validation
+  if (lakeModuleEnabled) {
+    // Check if lakes are provided (either via CSV or LakeConfigSection)
+    bool hasLakes = (basin && basin->GetLakes() && !basin->GetLakes()->empty());
+    
+    if (!hasLakes) {
+      ERROR_LOG("LakeModule is enabled but no lakes are provided (neither lakes_csv nor lake references)");
+      return INVALID_RESULT;
+    }
+    
+    // For calibration runs, lake calibration parameters are required
+    if (IsCalibrationRunStyle(style) && !lakeCaliParamSet) {
+      ERROR_LOG("LakeModule is enabled for calibration but lake calibration parameter set is not specified");
+      return INVALID_RESULT;
+    }
+  } else {
+    // Lake module is disabled, so lake-related parameters should not be set
+    if (lakeCaliParamSet) {
+      ERROR_LOG("Lake calibration parameter set is specified but LakeModule is disabled");
+      return INVALID_RESULT;
+    }
+    // Lake model is not used as a main water balance model, so this check is not needed
   }
 
   return VALID_RESULT;

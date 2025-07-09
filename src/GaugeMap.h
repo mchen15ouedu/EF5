@@ -3,6 +3,7 @@
 
 #include "GaugeConfigSection.h"
 #include "GridNode.h"
+#include "TimeVar.h"
 #include <map>
 #include <vector>
 
@@ -16,6 +17,10 @@ public:
                     std::vector<float> *gaugeAvg);
   void GetGaugeArea(std::vector<GridNode> *nodes,
                     std::vector<float> *gaugeArea);
+  
+  // New methods for saving/loading gauge relationships
+  void SaveGaugeRelationships(TimeVar *currentTime, char *statePath);
+  bool LoadGaugeRelationships(TimeVar *beginTime, char *statePath);
 
 private:
   std::vector<GaugeConfigSection *> gauges;

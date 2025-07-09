@@ -8,14 +8,37 @@
 #include "ExecuteConfigSection.h"
 #include "GaugeConfigSection.h"
 #include "GeographicProjection.h"
+#include "InundationParamSetConfigSection.h"
 #include "LAEAProjection.h"
 #include "Messages.h"
 #include "Model.h"
+#include "PETConfigSection.h"
+#include "ParamSetConfigSection.h"
+#include "PrecipConfigSection.h"
+#include "RoutingParamSetConfigSection.h"
 #include "Simulator.h"
+#include "SnowParamSetConfigSection.h"
 #include "TaskConfigSection.h"
+#include "TempConfigSection.h"
 #include "TimeVar.h"
 #include <cstdio>
 #include <cstring>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <string>
+
+// Global variable declarations
+extern BasicConfigSection *g_basicConfig;
+extern ExecuteConfigSection *g_executeConfig;
+extern std::map<std::string, PrecipConfigSection *> g_precipConfigs;
+extern std::map<std::string, PETConfigSection *> g_petConfigs;
+extern std::map<std::string, TempConfigSection *> g_tempConfigs;
+extern std::map<std::string, GaugeConfigSection *> g_gaugeConfigs;
+extern std::map<std::string, BasinConfigSection *> g_basinConfigs;
+extern std::map<std::string, ParamSetConfigSection *> g_paramSetConfigs[];
+extern std::map<std::string, RoutingParamSetConfigSection *> g_routingParamSetConfigs[];
+extern std::map<std::string, SnowParamSetConfigSection *> g_snowParamSetConfigs[];
+extern std::map<std::string, InundationParamSetConfigSection *> g_inundationParamSetConfigs[];
 
 static void LoadProjection();
 static void ExecuteSimulation(TaskConfigSection *task);
@@ -27,6 +50,9 @@ static void ExecuteClipBasin(TaskConfigSection *task);
 static void ExecuteClipGauge(TaskConfigSection *task);
 static void ExecuteMakeBasic(TaskConfigSection *task);
 static void ExecuteMakeBasinAvg(TaskConfigSection *task);
+static bool CheckDirectoryExists(const char* path, const char* description);
+static bool CheckOptionalDirectoryExists(const char* path, const char* description);
+static bool ValidateAllDirectories();
 
 void ExecuteTasks() {
 
@@ -34,6 +60,14 @@ void ExecuteTasks() {
     ERROR_LOGF("%s", "No execute section specified!");
     return;
   }
+
+  // Validate all directories specified in control file
+  if (!ValidateAllDirectories()) {
+    ERROR_LOG("Directory validation failed. Exiting.");
+    return;
+  }
+
+
 
   std::vector<TaskConfigSection *> *tasks = g_executeConfig->GetTasks();
   std::vector<TaskConfigSection *>::iterator taskItr;
@@ -161,9 +195,18 @@ void ExecuteCalibrationARS(TaskConfigSection *task) {
   printf("Precip loaded!\n");
 
   ARS ars;
-  ars.Initialize(task->GetCaliParamSec(), task->GetRoutingCaliParamSec(), NULL,
+  int numSnow = 0;
+  if (task->GetSnow() != SNOW_QTY) {
+    numSnow = numSnowParams[task->GetSnow()];
+  }
+  int numLake = 0;
+  if (task->IsLakeModuleEnabled() && task->GetLakeCaliParamSec()) {
+    numLake = numLakeParams[0]; // Assuming lake parameters are the same for all lake types
+  }
+  ars.Initialize(task->GetCaliParamSec(), task->GetRoutingCaliParamSec(), 
+                 task->GetSnowCaliParamSec(), task->GetLakeCaliParamSec(),
                  numModelParams[task->GetModel()],
-                 numRouteParams[task->GetRouting()], 0, &sim);
+                 numRouteParams[task->GetRouting()], numSnow, numLake, &sim);
   ars.CalibrateParams();
 
   sprintf(buffer, "%s/cali_ars.%s.%s.csv", task->GetOutput(),
@@ -189,8 +232,8 @@ void ExecuteCalibrationDREAM(TaskConfigSection *task) {
     numSnow = numSnowParams[task->GetSnow()];
   }
   int numLake = 0;
-  if (task->GetLakeCaliParamSec() != NULL) {
-    numLake = task->GetLakeCaliParamSec()->GetNumParams();
+  if (task->IsLakeModuleEnabled() && task->GetLakeCaliParamSec()) {
+    numLake = numLakeParams[0]; // Assuming lake parameters are the same for all lake types
   }
   dream.Initialize(task->GetCaliParamSec(), task->GetRoutingCaliParamSec(),
                    task->GetSnowCaliParamSec(), task->GetLakeCaliParamSec(),
@@ -276,6 +319,8 @@ void ExecuteClipBasin(TaskConfigSection *task) {
   if (pitr != routeParamSettings->end()) {
     defaultRouteParams = pitr->second;
   }
+  
+  // Lake parameters are now handled through CSV file, not parameter sets
 
   CarveBasin(task->GetBasinSec(), &nodes, paramSettings, &fullParamSettings,
              &gaugeMap, defaultParams, routeParamSettings,
@@ -306,6 +351,8 @@ void ExecuteClipGauge(TaskConfigSection *task) {
   if (pitr != routeParamSettings->end()) {
     defaultRouteParams = pitr->second;
   }
+  
+  // Lake parameters are now handled through CSV file, not parameter sets
 
   CarveBasin(task->GetBasinSec(), &nodes, paramSettings, &fullParamSettings,
              &gaugeMap, defaultParams, routeParamSettings,
@@ -326,3 +373,212 @@ void ExecuteMakeBasinAvg(TaskConfigSection *task) {
     sim.CleanUp();
   }
 }
+
+bool CheckDirectoryExists(const char* path, const char* description) {
+  if (!path || strlen(path) == 0) {
+    return true; // Skip empty paths
+  }
+  
+  // Extract directory from file path
+  std::string dirPath = std::string(path);
+  size_t lastSlash = dirPath.find_last_of("/\\");
+  if (lastSlash != std::string::npos) {
+    dirPath = dirPath.substr(0, lastSlash);
+  } else {
+    // If no slash found, it's just a filename in current directory
+    return true;
+  }
+  
+  if (dirPath.empty()) {
+    return true; // Root directory
+  }
+  
+  struct stat path_stat;
+  if (stat(dirPath.c_str(), &path_stat) != 0) {
+    ERROR_LOGF("Directory does not exist: %s (%s)", dirPath.c_str(), description);
+    return false;
+  }
+  
+  if (!S_ISDIR(path_stat.st_mode)) {
+    ERROR_LOGF("Path exists but is not a directory: %s (%s)", dirPath.c_str(), description);
+    return false;
+  }
+  
+  return true;
+}
+
+bool CheckOptionalDirectoryExists(const char* path, const char* description) {
+  if (!path || strlen(path) == 0) {
+    return true; // Skip empty paths
+  }
+  
+  // Extract directory from file path
+  std::string dirPath = std::string(path);
+  size_t lastSlash = dirPath.find_last_of("/\\");
+  if (lastSlash != std::string::npos) {
+    dirPath = dirPath.substr(0, lastSlash);
+  } else {
+    // If no slash found, it's just a filename in current directory
+    return true;
+  }
+  
+  if (dirPath.empty()) {
+    return true; // Root directory
+  }
+  
+  struct stat path_stat;
+  if (stat(dirPath.c_str(), &path_stat) != 0) {
+    WARNING_LOGF("Optional directory does not exist: %s (%s)", dirPath.c_str(), description);
+    return true; // Don't fail for optional directories
+  }
+  
+  if (!S_ISDIR(path_stat.st_mode)) {
+    WARNING_LOGF("Optional path exists but is not a directory: %s (%s)", dirPath.c_str(), description);
+    return true; // Don't fail for optional directories
+  }
+  
+  return true;
+}
+
+bool ValidateAllDirectories() {
+  bool allValid = true;
+  
+  // Check Basic section directories
+  if (g_basicConfig) {
+    allValid &= CheckDirectoryExists(g_basicConfig->GetDEM(), "DEM file directory");
+    allValid &= CheckDirectoryExists(g_basicConfig->GetDDM(), "DDM file directory");
+    allValid &= CheckDirectoryExists(g_basicConfig->GetFAM(), "FAM file directory");
+  }
+  
+  // Check all task output directories
+  if (g_executeConfig) {
+    std::vector<TaskConfigSection *> *tasks = g_executeConfig->GetTasks();
+    for (size_t i = 0; i < tasks->size(); i++) {
+      TaskConfigSection *task = tasks->at(i);
+      allValid &= CheckDirectoryExists(task->GetOutput(), 
+                                      (std::string("Model output directory: ") + task->GetName()).c_str());
+      
+      // Check state directory if using states
+      if (task->UseStates()) {
+        allValid &= CheckDirectoryExists(task->GetState(), 
+                                        (std::string("Model state directory: ") + task->GetName()).c_str());
+      }
+    }
+    
+    // Check ensemble task output directories
+    std::vector<EnsTaskConfigSection *> *ensTasks = g_executeConfig->GetEnsTasks();
+    for (size_t i = 0; i < ensTasks->size(); i++) {
+      // Note: Ensemble tasks don't have their own output directories
+      // They use the output directories of their constituent tasks
+      // The output directories will be checked when processing individual tasks
+    }
+  }
+  
+  // Check precipitation directories
+  for (std::map<std::string, PrecipConfigSection *>::iterator itr = g_precipConfigs.begin();
+       itr != g_precipConfigs.end(); itr++) {
+    PrecipConfigSection *precip = itr->second;
+    allValid &= CheckDirectoryExists(precip->GetLoc(), 
+                                    (std::string("Precipitation directory: ") + itr->first).c_str());
+  }
+  
+  // Check PET directories
+  for (std::map<std::string, PETConfigSection *>::iterator itr = g_petConfigs.begin();
+       itr != g_petConfigs.end(); itr++) {
+    PETConfigSection *pet = itr->second;
+    allValid &= CheckDirectoryExists(pet->GetLoc(), 
+                                    (std::string("PET directory: ") + itr->first).c_str());
+  }
+  
+  // Check temperature directories (optional)
+  for (std::map<std::string, TempConfigSection *>::iterator itr = g_tempConfigs.begin();
+       itr != g_tempConfigs.end(); itr++) {
+    TempConfigSection *temp = itr->second;
+    CheckOptionalDirectoryExists(temp->GetLoc(), 
+                                (std::string("Temperature directory: ") + itr->first).c_str());
+    
+    // Check DEM directory for temperature if specified (optional)
+    if (temp->GetDEM() && strlen(temp->GetDEM()) > 0) {
+      CheckOptionalDirectoryExists(temp->GetDEM(), 
+                                  (std::string("Temperature DEM directory: ") + itr->first).c_str());
+    }
+  }
+  
+  // Check gauge observation file directories
+  for (std::map<std::string, GaugeConfigSection *>::iterator itr = g_gaugeConfigs.begin();
+       itr != g_gaugeConfigs.end(); itr++) {
+    // Note: Gauge observation files are handled through TimeSeries, so we can't check them here
+    // They will be checked when the gauge is processed
+  }
+  
+  // Check parameter grid files (ParamGrid) - all optional
+  // Check water balance parameter grids (optional)
+  for (std::map<std::string, ParamSetConfigSection *>::iterator itr = g_paramSetConfigs[0].begin();
+       itr != g_paramSetConfigs[0].end(); itr++) {
+    ParamSetConfigSection *paramSet = itr->second;
+    std::vector<std::string> *paramGrids = paramSet->GetParamGrids();
+    for (size_t i = 0; i < paramGrids->size(); i++) {
+      if (!(*paramGrids)[i].empty()) {
+        char desc[256];
+        sprintf(desc, "Water balance parameter grid: %s[%lu]", itr->first.c_str(), (unsigned long)i);
+        CheckOptionalDirectoryExists((*paramGrids)[i].c_str(), desc);
+      }
+    }
+  }
+  
+  // Check routing parameter grids (optional)
+  for (std::map<std::string, RoutingParamSetConfigSection *>::iterator itr = g_routingParamSetConfigs[0].begin();
+       itr != g_routingParamSetConfigs[0].end(); itr++) {
+    RoutingParamSetConfigSection *routingParamSet = itr->second;
+    std::vector<std::string> *paramGrids = routingParamSet->GetParamGrids();
+    for (size_t i = 0; i < paramGrids->size(); i++) {
+      if (!(*paramGrids)[i].empty()) {
+        char desc[256];
+        sprintf(desc, "Routing parameter grid: %s[%lu]", itr->first.c_str(), (unsigned long)i);
+        CheckOptionalDirectoryExists((*paramGrids)[i].c_str(), desc);
+      }
+    }
+  }
+  
+  // Check snow parameter grids (optional)
+  for (std::map<std::string, SnowParamSetConfigSection *>::iterator itr = g_snowParamSetConfigs[0].begin();
+       itr != g_snowParamSetConfigs[0].end(); itr++) {
+    SnowParamSetConfigSection *snowParamSet = itr->second;
+    std::vector<std::string> *paramGrids = snowParamSet->GetParamGrids();
+    for (size_t i = 0; i < paramGrids->size(); i++) {
+      if (!(*paramGrids)[i].empty()) {
+        char desc[256];
+        sprintf(desc, "Snow parameter grid: %s[%lu]", itr->first.c_str(), (unsigned long)i);
+        CheckOptionalDirectoryExists((*paramGrids)[i].c_str(), desc);
+      }
+    }
+  }
+  
+  // Check inundation parameter grids (optional)
+  for (std::map<std::string, InundationParamSetConfigSection *>::iterator itr = g_inundationParamSetConfigs[0].begin();
+       itr != g_inundationParamSetConfigs[0].end(); itr++) {
+    InundationParamSetConfigSection *inundationParamSet = itr->second;
+    std::vector<std::string> *paramGrids = inundationParamSet->GetParamGrids();
+    for (size_t i = 0; i < paramGrids->size(); i++) {
+      if (!(*paramGrids)[i].empty()) {
+        char desc[256];
+        sprintf(desc, "Inundation parameter grid: %s[%lu]", itr->first.c_str(), (unsigned long)i);
+        CheckOptionalDirectoryExists((*paramGrids)[i].c_str(), desc);
+      }
+    }
+  }
+  
+  // Check lake CSV file directories and engineered discharge files
+  for (std::map<std::string, BasinConfigSection *>::iterator itr = g_basinConfigs.begin();
+       itr != g_basinConfigs.end(); itr++) {
+    // Note: Lake CSV files and engineered discharge files are read during basin processing
+    // We can't check them here as they're not stored as separate paths in the config
+    // They will be checked when the basin is processed
+  }
+  
+  return allValid;
+}
+
+
+
+

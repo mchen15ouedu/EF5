@@ -2,6 +2,7 @@
 #define CONFIG_LAKE_CALI_PARAM_SECTION_H
 
 #include "CaliParamConfigSection.h"
+#include "Model.h"
 #include <string>
 
 class LakeCaliParamConfigSection : public CaliParamConfigSection {
@@ -16,6 +17,15 @@ public:
 
   // Get the lake name being calibrated
   const std::string& GetCalibratedLakeName() const { return calibratedLakeName; }
+  
+  // Get the number of lake parameters
+  int GetNumParams() const { return numLakeParams[0]; }
+  
+  // Get parameter name string
+  const char* GetParamString(int index) const { 
+    if (index == 0) return "klake"; 
+    return "unknown"; 
+  }
 
 private:
   std::string calibratedLakeName; // Name of the lake being calibrated

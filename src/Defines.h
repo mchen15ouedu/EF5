@@ -1,7 +1,7 @@
 #ifndef DEFINES_H
 #define DEFINES_H
 
-#define EF5_VERSION "1.3.3"
+#define EF5_VERSION "4.2.0"
 
 #define CONFIG_MAX_LEN 256
 
@@ -11,9 +11,6 @@
 #define TORADIANS(x) (x) / 180 * 3.1415926
 #define TODEGREES(x) (x) / 3.1415926 * 180
 #define PI 3.1415926
-
-// Minimum threshold for calculations (8 decimal places)
-#define MIN_THRESHOLD 0.0000001f
 
 // This is here because both grids & projections need to know about it!
 /*

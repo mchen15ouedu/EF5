@@ -9,8 +9,6 @@
 #include <omp.h>
 #endif
 #include "DREAM.h"
-#include "CaliParamConfigSection.h"
-#include "LakeCaliParamConfigSection.h"
 
 void DREAM::Initialize(CaliParamConfigSection *caliParamConfigNew,
                        RoutingCaliParamConfigSection *routingCaliParamConfigNew,
@@ -591,7 +589,15 @@ void DREAM::WriteOutput(char *outputFile, MODELS model, ROUTES route,
     int endi =
         numModelParams[model] + numRouteParams[route] + numSnowParams[snow];
     for (i = starti; i < endi; i++) {
-      fprintf(file, ",%s\n", snowParamStrings[snow][i - starti]);
+      fprintf(file, ",%s", snowParamStrings[snow][i - starti]);
+    }
+  }
+
+  if (numParamsL > 0) {
+    int starti = numModelParams[model] + numRouteParams[route] + numParamsS;
+    int endi = numModelParams[model] + numRouteParams[route] + numParamsS + numParamsL;
+    for (i = starti; i < endi; i++) {
+      fprintf(file, ",%s", lakeParamStrings[0][i - starti]);
     }
   }
 
@@ -637,22 +643,13 @@ void DREAM::WriteOutput(char *outputFile, MODELS model, ROUTES route,
 
   if (numParamsL > 0) {
     fprintf(file, "[Lake]\n");
-    int starti = numModelParams[model] + numRouteParams[route] + numSnowParams[snow];
-    int endi = starti + numParamsL;
-    
-    // Add lake calibration information
-    if (lakeCaliParamConfig != NULL) {
-      std::string targetLakeName = lakeCaliParamConfig->GetCalibratedLakeName();
-      fprintf(file, "# Calibrated Lake: %s\n", targetLakeName.c_str());
-      fprintf(file, "# Parameter\tBest_Value\tMin\tMax\tInitial\n");
-    }
-    
+    int starti = numModelParams[model] + numRouteParams[route] + numParamsS;
+    int endi = numModelParams[model] + numRouteParams[route] + numParamsS + numParamsL;
     for (i = starti; i < endi; i++) {
-      fprintf(file, "%s=%f\n", lakeCaliParamConfig->GetParamString(i - starti),
+      fprintf(file, "%s=%f\n", lakeParamStrings[0][i - starti],
               bestParams[i]);
     }
   }
-
   fclose(file);
 }
 

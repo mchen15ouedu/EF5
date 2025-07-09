@@ -6,12 +6,7 @@
 #include "dream_functions.h"
 #include "dream_variables.h"
 #include "misc_functions.h"
-
-// Forward declarations
-class CaliParamConfigSection;
-class LakeCaliParamConfigSection;
-class RoutingCaliParamConfigSection;
-class SnowCaliParamConfigSection;
+#include "LakeCaliParamConfigSection.h"
 
 class DREAM : public Calibrate {
 public:
@@ -33,10 +28,6 @@ private:
                    struct DREAM_Parameters *MCMC, struct Model_Input *Input,
                    int option);
 
-  CaliParamConfigSection *caliParamConfig;
-  RoutingCaliParamConfigSection *routingCaliParamConfig;
-  SnowCaliParamConfigSection *snowCaliParamConfig;
-  LakeCaliParamConfigSection *lakeCaliParamConfig;
   float *minParams;
   float *maxParams;
   struct DREAM_Parameters *pointerMCMC;
@@ -46,7 +37,12 @@ private:
   bool isEnsemble;
   std::vector<Simulator> *ensSims;
   std::vector<int> *paramsPerSim;
+  CaliParamConfigSection *caliParamConfig;
+  RoutingCaliParamConfigSection *routingCaliParamConfig;
+  SnowCaliParamConfigSection *snowCaliParamConfig;
+  LakeCaliParamConfigSection *lakeCaliParamConfig;
   int numParamsWB, numParamsR, numParamsS, numParamsL;
+  Simulator *sim;
 
   int post_Sequences;
   struct DREAM_Variables *pointerRUNvar;

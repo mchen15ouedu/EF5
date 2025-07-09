@@ -1,13 +1,169 @@
 #include "BasinConfigSection.h"
+#include "BasicGrids.h"
+#include "Config.h"
+#include "GaugeConfigSection.h"
+#include "LakeConfigSection.h"
+#include "LakeModel.h"
 #include "Messages.h"
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <sstream>
-#include "BasicGrids.h"
-#include <cmath>
+#include <string>
+#include <sys/stat.h>
 
 std::map<std::string, BasinConfigSection *> g_basinConfigs;
+
+// Helper function to read lakes from CSV file
+static bool ReadLakesFromCSV(const std::string& filename, std::vector<LakeInfo>& lakes) {
+  // Check if directory exists
+  std::string dirPath = filename;
+  size_t lastSlash = dirPath.find_last_of("/\\");
+  if (lastSlash != std::string::npos) {
+    dirPath = dirPath.substr(0, lastSlash);
+    if (!dirPath.empty()) {
+      struct stat path_stat;
+      if (stat(dirPath.c_str(), &path_stat) != 0) {
+        ERROR_LOGF("Directory does not exist for lakes CSV file: %s", dirPath.c_str());
+        return false;
+      }
+      if (!S_ISDIR(path_stat.st_mode)) {
+        ERROR_LOGF("Path exists but is not a directory for lakes CSV file: %s", dirPath.c_str());
+        return false;
+      }
+      INFO_LOGF("Directory validated for lakes CSV file: %s", dirPath.c_str());
+    }
+  }
+  
+  std::ifstream file(filename.c_str());
+  if (!file.is_open()) {
+    ERROR_LOGF("Failed to open lakes CSV file: %s", filename.c_str());
+    return false;
+  }
+
+  std::string line;
+  // Skip header line
+  if (std::getline(file, line)) {
+    // Check if header is valid
+    if (line.find("name") == std::string::npos || 
+        line.find("lat") == std::string::npos || 
+        line.find("lon") == std::string::npos) {
+      ERROR_LOGF("Invalid lakes CSV header in file: %s", filename.c_str());
+      return false;
+    }
+  }
+
+  // Read data lines
+  while (std::getline(file, line)) {
+    std::stringstream ss(line);
+    std::string token;
+    LakeInfo lake;
+
+    // Parse name
+    if (!std::getline(ss, token, ',')) continue;
+    lake.name = token;
+
+    // Parse lat
+    if (!std::getline(ss, token, ',')) continue;
+    lake.lat = atof(token.c_str());
+
+    // Parse lon
+    if (!std::getline(ss, token, ',')) continue;
+    lake.lon = atof(token.c_str());
+
+    // Parse th_volume
+    if (!std::getline(ss, token, ',')) continue;
+    lake.th_volume = atof(token.c_str());
+
+    // Parse area
+    if (!std::getline(ss, token, ',')) continue;
+    lake.area = atof(token.c_str());
+
+    // Parse klake (optional)
+    if (std::getline(ss, token, ',')) {
+      lake.retention_constant = atof(token.c_str());
+    } else {
+      lake.retention_constant = 24.0; // Default value
+    }
+
+    lakes.push_back(lake);
+  }
+
+  file.close();
+  INFO_LOGF("Successfully loaded %lu lakes from %s", (unsigned long)lakes.size(), filename.c_str());
+  return true;
+}
+
+// Helper function to read engineered discharge from CSV file
+static bool ReadEngineeredDischargeFromCSV(const std::string& filename, std::map<std::string, double>& engineeredDischarge) {
+  // Check if directory exists
+  std::string dirPath = filename;
+  size_t lastSlash = dirPath.find_last_of("/\\");
+  if (lastSlash != std::string::npos) {
+    dirPath = dirPath.substr(0, lastSlash);
+    if (!dirPath.empty()) {
+      struct stat path_stat;
+      if (stat(dirPath.c_str(), &path_stat) != 0) {
+        ERROR_LOGF("Directory does not exist for engineered discharge CSV file: %s", dirPath.c_str());
+        return false;
+      }
+      if (!S_ISDIR(path_stat.st_mode)) {
+        ERROR_LOGF("Path exists but is not a directory for engineered discharge CSV file: %s", dirPath.c_str());
+        return false;
+      }
+      INFO_LOGF("Directory validated for engineered discharge CSV file: %s", dirPath.c_str());
+    }
+  }
+  
+  std::ifstream file(filename.c_str());
+  if (!file.is_open()) {
+    ERROR_LOGF("Failed to open engineered discharge CSV file: %s", filename.c_str());
+    return false;
+  }
+
+  std::string line;
+  std::vector<std::string> lakeNames;
+  
+  // Read header line to get lake names
+  if (std::getline(file, line)) {
+    std::stringstream ss(line);
+    std::string token;
+    
+    // Skip timestamp column
+    if (!std::getline(ss, token, ',')) return false;
+    
+    // Read lake names from header
+    while (std::getline(ss, token, ',')) {
+      lakeNames.push_back(token);
+    }
+  }
+
+  // Read first data line (we'll use the first timestamp for now)
+  if (std::getline(file, line)) {
+    std::stringstream ss(line);
+    std::string token;
+
+    // Skip timestamp
+    if (!std::getline(ss, token, ',')) return false;
+
+    // Parse discharge values for each lake
+    int lakeIndex = 0;
+    while (std::getline(ss, token, ',') && lakeIndex < (int)lakeNames.size()) {
+      double discharge = atof(token.c_str());
+      if (discharge != 0.0 || token == "0" || token == "0.0") {
+        engineeredDischarge[lakeNames[lakeIndex]] = discharge;
+      } else {
+        WARNING_LOGF("Failed to parse discharge value '%s' for lake '%s'", token.c_str(), lakeNames[lakeIndex].c_str());
+      }
+      lakeIndex++;
+    }
+  }
+
+  file.close();
+  INFO_LOGF("Successfully loaded %lu engineered discharge values from %s", (unsigned long)engineeredDischarge.size(), filename.c_str());
+  return true;
+}
 
 BasinConfigSection::BasinConfigSection(char *newName) { strcpy(name, newName); }
 
@@ -27,14 +183,41 @@ CONFIG_SEC_RET BasinConfigSection::ProcessKeyValue(char *name, char *value) {
       return INVALID_RESULT;
     }
     gauges.push_back(itr->second);
-  } else if (strcmp(name, "LakeListFile") == 0) {
-    lakeListFile = value;
-    LoadLakesFromCSV(lakeListFile);
-    return VALID_RESULT;
-  } else if (strcmp(name, "DamQ") == 0) {
-    engineeredDischargeFile = value;
-    LoadEngineeredDischargeCSV(engineeredDischargeFile);
-    return VALID_RESULT;
+  } else if (strcasecmp(name, "lakes_csv") == 0 || strcasecmp(name, "lakelistfile") == 0) {
+    // Read lakes from CSV file
+    if (!ReadLakesFromCSV(value, lakes)) {
+      ERROR_LOGF("Failed to read lakes from CSV file: %s", value);
+      return INVALID_RESULT;
+    }
+  } else if (strcasecmp(name, "engineered_discharge_csv") == 0 || strcasecmp(name, "lakeoutflowfile") == 0 || strcasecmp(name, "damq") == 0) {
+    // Read engineered discharge from CSV file
+    if (!ReadEngineeredDischargeFromCSV(value, engineeredDischarge)) {
+      ERROR_LOGF("Failed to read engineered discharge from CSV file: %s", value);
+      return INVALID_RESULT;
+    }
+  } else if (strcasecmp(name, "lake") == 0) {
+    // Reference a lake defined in a LakeConfigSection
+    TOLOWER(value);
+    std::map<std::string, LakeConfigSection *>::iterator itr = g_lakeConfigs.find(value);
+    if (itr == g_lakeConfigs.end()) {
+      ERROR_LOGF("Unknown lake \"%s\" in basin!", value);
+      return INVALID_RESULT;
+    }
+    
+    // Convert LakeConfigSection to LakeInfo and add to lakes vector
+    LakeConfigSection *lakeSec = itr->second;
+    LakeInfo lakeInfo;
+    lakeInfo.name = lakeSec->GetName();
+    lakeInfo.lat = static_cast<double>(lakeSec->GetLat());
+    lakeInfo.lon = static_cast<double>(lakeSec->GetLon());
+    lakeInfo.th_volume = static_cast<double>(lakeSec->GetThVolume());
+    lakeInfo.area = static_cast<double>(lakeSec->GetArea());
+    lakeInfo.retention_constant = static_cast<double>(lakeSec->GetRetentionConstant());
+    lakeInfo.obsFlowAccum = static_cast<double>(lakeSec->GetObsFlowAccum());
+    lakeInfo.obsFlowAccumSet = lakeSec->HasObsFlowAccum();
+    
+    lakes.push_back(lakeInfo);
+    INFO_LOGF("Added lake %s from LakeConfigSection to basin", lakeInfo.name.c_str());
   } else {
     ERROR_LOGF("Unknown key value \"%s=%s\" in basin %s!", name, value,
                this->name);
@@ -76,152 +259,4 @@ bool BasinConfigSection::IsDuplicate(char *name) {
   } else {
     return true;
   }
-}
-
-void BasinConfigSection::LoadLakesFromCSV(const std::string& filename) {
-    std::ifstream file(filename);
-    if (!file.is_open()) return;
-    std::string line;
-    // Skip header
-    std::getline(file, line);
-    while (std::getline(file, line)) {
-        std::istringstream ss(line);
-        std::string name, lat, lon, thVol, area, klake;
-        std::getline(ss, name, ',');
-        std::getline(ss, lat, ',');
-        std::getline(ss, lon, ',');
-        std::getline(ss, thVol, ',');
-        std::getline(ss, area, ',');
-        std::getline(ss, klake, ',');
-        LakeConfigSection* lake = new LakeConfigSection(name.c_str());
-        lake->ProcessKeyValue((char*)"Lat", (char*)lat.c_str());
-        lake->ProcessKeyValue((char*)"Lon", (char*)lon.c_str());
-        lake->ProcessKeyValue((char*)"ThVolume", (char*)thVol.c_str());
-        lake->ProcessKeyValue((char*)"Area", (char*)area.c_str());
-        if (!klake.empty()) {
-            lake->ProcessKeyValue((char*)"Klake", (char*)klake.c_str());
-        }
-        lakes.push_back(lake);
-    }
-}
-
-void BasinConfigSection::AssignLakesToGridNodes(const std::vector<GridNode>& gridNodes) {
-    for (auto* lake : lakes) {
-        GridLoc pt;
-        if (!g_FAM->GetGridLoc(lake->GetLon(), lake->GetLat(), &pt)) continue;
-        float maxFAM = -1e30f;
-        long bestX = pt.x, bestY = pt.y;
-        // Search 3x3 window around (pt.x, pt.y)
-        for (long dy = -1; dy <= 1; ++dy) {
-            for (long dx = -1; dx <= 1; ++dx) {
-                long x = pt.x + dx;
-                long y = pt.y + dy;
-                if (x < 0 || y < 0 || x >= g_FAM->numCols || y >= g_FAM->numRows) continue;
-                float famVal = g_FAM->data[y][x];
-                if (famVal != g_FAM->noData && famVal > maxFAM) {
-                    maxFAM = famVal;
-                    bestX = x;
-                    bestY = y;
-                }
-            }
-        }
-        // Find the grid node with (bestX, bestY)
-        long foundIdx = -1;
-        for (size_t i = 0; i < gridNodes.size(); ++i) {
-            if (gridNodes[i].x == bestX && gridNodes[i].y == bestY) {
-                foundIdx = static_cast<long>(i);
-                break;
-            }
-        }
-        lake->SetGridNodeIndex(foundIdx);
-    }
-}
-
-void BasinConfigSection::LoadEngineeredDischargeCSV(const std::string& filename) {
-    std::ifstream file(filename);
-    if (!file.is_open()) return;
-    std::string line;
-    // Read header
-    if (!std::getline(file, line)) return;
-    std::vector<std::string> lakeNames;
-    std::istringstream header(line);
-    std::string col;
-    // First column is time
-    std::getline(header, col, ',');
-    while (std::getline(header, col, ',')) {
-        lakeNames.push_back(col);
-    }
-    // Warn if any lake in the LakeListFile is missing from DamQ file
-    for (auto* lake : lakes) {
-        bool found = false;
-        for (const auto& name : lakeNames) {
-            if (lake->GetName() == name) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            WARNING_LOGF("Lake '%s' in LakeListFile is missing from DamQ file header.", lake->GetName());
-        }
-    }
-    // Read each row
-    while (std::getline(file, line)) {
-        std::istringstream ss(line);
-        std::string timestamp;
-        std::getline(ss, timestamp, ',');
-        for (size_t i = 0; i < lakeNames.size(); ++i) {
-            std::string val;
-            if (!std::getline(ss, val, ',')) break;
-            double discharge = atof(val.c_str());
-            lakeDischargeTS[lakeNames[i]][timestamp] = discharge;
-        }
-    }
-}
-
-void BasinConfigSection::ProcessLakeInletSection(const std::string& lakeName, float lat, float lon, const std::vector<GridNode>& gridNodes) {
-    // Find the lake by name
-    for (auto* lake : lakes) {
-        if (lake->GetName() == lakeName) {
-            // Find nearest channel (highest FAM in a small window around lat/lon)
-            GridLoc pt;
-            if (!g_FAM->GetGridLoc(lon, lat, &pt)) return;
-            float maxFAM = -1e30f;
-            long bestIdx = -1;
-            for (long dy = -2; dy <= 2; ++dy) {
-                for (long dx = -2; dx <= 2; ++dx) {
-                    long x = pt.x + dx;
-                    long y = pt.y + dy;
-                    if (x < 0 || y < 0 || x >= g_FAM->numCols || y >= g_FAM->numRows) continue;
-                    float famVal = g_FAM->data[y][x];
-                    if (famVal != g_FAM->noData && famVal > maxFAM) {
-                        // Find grid node index
-                        for (size_t i = 0; i < gridNodes.size(); ++i) {
-                            if (gridNodes[i].x == x && gridNodes[i].y == y) {
-                                maxFAM = famVal;
-                                bestIdx = (long)i;
-                            }
-                        }
-                    }
-                }
-            }
-            if (bestIdx >= 0) {
-                lake->AddInlet(lat, lon, bestIdx);
-            }
-            break;
-        }
-    }
-}
-
-double BasinConfigSection::GetEngineeredDischarge(const std::string& lakeName, const std::string& timestamp) const {
-    auto lakeIt = lakeDischargeTS.find(lakeName);
-    if (lakeIt == lakeDischargeTS.end()) {
-        return -1.0; // Lake not found
-    }
-    
-    auto timeIt = lakeIt->second.find(timestamp);
-    if (timeIt == lakeIt->second.end()) {
-        return -1.0; // Timestamp not found
-    }
-    
-    return timeIt->second;
 }
