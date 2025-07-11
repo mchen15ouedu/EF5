@@ -132,7 +132,7 @@ Mengye Chen
 
 ## Lake Module Integration
 
-The EF5 v4.0 includes an integrated lake module that can be controlled via the `LakeModule` flag in the task configuration.
+The EF5 v4.2 includes an integrated lake module that can be controlled via the `LakeModule` flag in the task configuration.
 
 ### Lake Module Control
 
@@ -190,4 +190,4 @@ The system will validate lake module configuration and provide clear error messa
 - `Lake calibration parameter set is specified but LakeModule is disabled`
 - `Lake model is specified but LakeModule is disabled`
 
-### CSV File Formats
+### CSV File Formats (see example files in the root directoy)
