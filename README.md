@@ -50,7 +50,6 @@ The lake module integrates with EF5's DREAM calibration system:
 LakeModule = true
 State = ./states
 StateTime = 20240101_00
-SaveStates = true
 
 # Method 1: Define lakes in lakes.csv (recommended for multiple lakes)
 [BASIN MyBasin]
@@ -82,7 +81,7 @@ See `LAKE_INTEGRATION_README.md` for detailed documentation.
 
 ## Learn More
 
-EF5 has a homepage at [http://ef5.ou.edu](http://ef5.ou.edu). The training modules are found at [http://ef5.ou.edu/training/](http://ef5.ou.edu/training/) while the YouTube videos may be found at [https://www.youtube.com/channel/UCgoGJtdeqHgwoYIRhkgMwog](https://www.youtube.com/channel/UCgoGJtdeqHgwoYIRhkgMwog). The source code is found on GitHub at [https://github.com/HyDROSLab/EF5](https://github.com/HyDROSLab/EF5).
+EF5 has a homepage at [http://ef5.ou.edu](http://ef5.ou.edu). The training modules are found at [http://ef5.ou.edu/training/](http://ef5.ou.edu/training/) while the YouTube videos may be found at [https://www.youtube.com/channel/UCgoGJtdeqHgwoYIRhkgMwog](https://www.youtube.com/channel/UCgoGJtdeqHgwoYIRhkgMwog). The source code is found on GitHub at [https://github.com/HyDROSLab/EF5](https://github.com/mchen15ouedu/EF5).
 
 See [manual.html](https://mchen15ouedu.github.io/EF5/docs/) for the EF5 operating manual which describes configuration options.
 
@@ -133,7 +132,7 @@ Mengye Chen
 
 ## Lake Module Integration
 
-The EF5 v4.0 includes an integrated lake module that can be controlled via the `LakeModule` flag in the task configuration.
+The EF5 v4.2 includes an integrated lake module that can be controlled via the `LakeModule` flag in the task configuration.
 
 ### Lake Module Control
 
@@ -156,16 +155,18 @@ LakeModule=true|false
 
 #### Method 1: CSV File Reading (Recommended for multiple lakes)
 ```
+[Task run]
 LakeModule=true
-lakes_csv=lakes.csv
-engineered_discharge_csv=engineered_discharge.csv  # Optional
-LakeCaliParam=default_lake_cali_params  # Required for calibration
+[Basin sample]
+lakelist=/lakes.csv
+DamQ=/engineered_discharge.csv  # Optional
 ```
 
 #### Method 2: Individual Lake Sections (Recommended for single lakes)
 ```
+[Task run]
 LakeModule=true
-LakeCaliParam=default_lake_cali_params  # Required for calibration
+
 
 [LAKE Reservoir1]
 Lat = 35.5
@@ -189,4 +190,4 @@ The system will validate lake module configuration and provide clear error messa
 - `Lake calibration parameter set is specified but LakeModule is disabled`
 - `Lake model is specified but LakeModule is disabled`
 
-### CSV File Formats
+### CSV File Formats (see example files in the root directoy)
