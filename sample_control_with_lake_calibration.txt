@@ -1,5 +1,6 @@
-# Sample EF5 Control File with Lake Calibration and State Saving
-# This example shows how to calibrate lake parameters with state saving capability
+# Sample EF5 Control File with Lake Calibration and State Saving - Version 4.2.0
+# This example shows how to calibrate lake parameters with DREAM algorithm
+# Features: Lake calibration, state saving, multiple lakes, engineered discharge
 
 [BASIC]
 DEM = data/dem.tif
@@ -8,37 +9,42 @@ FAM = data/fam.tif
 Projection = EPSG:4326
 
 [BASIN CalibrationBasin]
-LakeListFile = data/lakes.csv
+# Lakes can be specified via CSV file (recommended for multiple lakes)
+lakes_csv = data/lakes.csv
+# Optional: Engineered discharge for dam-controlled outflow
+engineered_discharge_csv = data/engineered_discharge.csv
 Gauge = CalibrationGauge
 
+# Lake calibration parameter set
+[lake_cali_param lake_calibration]
+lake_name = Lake1
+klake = 1.0,100.0  # min,max values for klake parameter (hours)
+
 [TASK LakeCalibration]
-Model = CREST
+Model = CREST  # Can use any EF5 model with lake module enabled
 Basin = CalibrationBasin
 Gauge = CalibrationGauge
 StartDate = 2020-01-01
 EndDate = 2020-12-31
 TimeStep = 1H
+# Lake module settings
 LakeModule = true
 Style = CALI_DREAM
+# Lake calibration parameters
+lake_cali_param = lake_calibration
+# State saving for restart capability
 State = ./states
 StateTime = 20200601_00
 SaveStates = true
 
-# Lake calibration parameter set
-[LAKE_CALI_PARAM lake_calibration]
-LakeName = Lake1
-klake = 1.0,100.0  ; min,max values (initial values come from lakes.csv)
-
-# Lake Module Features with State Saving:
-# 1. Automatic state saving/loading for lake storage and outflow
-# 2. Grid-based state management for distributed simulations
-# 3. Restart capability from any saved state
-# 4. Integration with existing EF5 state system
-# 5. Backward compatibility with existing lake configurations
-# 6. State files: lake_storage_YYYYMMDD_HHUU.tif, lake_outflow_YYYYMMDD_HHUU.tif
-
-# Lake Module Configuration
-LakeModule=true
-
-# Lake Calibration Parameters (required for calibration runs when LakeModule=true)
-LakeCaliParam=default_lake_cali_params 
+# Lake Module Features in Version 4.2.0:
+# 1. Automatic unit conversion: km³/km² to m³/m² for user-friendly input
+# 2. Multiple lake support in single simulation
+# 3. Engineered discharge via CSV files for dam-controlled outflow
+# 4. Lake calibration with DREAM algorithm
+# 5. State saving/loading for lake storage and outflow
+# 6. Grid-based state management for distributed simulations
+# 7. Integration with all EF5 water balance models
+# 8. Automatic state file generation: lake_storage_YYYYMMDD_HHUU.tif, lake_outflow_YYYYMMDD_HHUU.tif
+# 9. Backward compatibility with existing lake configurations
+# 10. Support for observed flow accumulation (obsFam) for calibration 

@@ -22,10 +22,11 @@ struct LakeInfo {
     double retention_constant; // Retention constant K (hours)
     double obsFlowAccum; // Observed flow accumulation (optional)
     bool obsFlowAccumSet; // Flag indicating if observed flow accumulation is set
+    bool outputts; // Flag indicating if lake volume should be output in gauge files
     
     // Default constructor for proper initialization
     LakeInfo() : lat(0.0), lon(0.0), th_volume(0.0), area(0.0), 
-                 retention_constant(24.0), obsFlowAccum(0.0), obsFlowAccumSet(false) {}
+                 retention_constant(24.0), obsFlowAccum(0.0), obsFlowAccumSet(false), outputts(false) {}
 };
 
 // Lake state enumeration

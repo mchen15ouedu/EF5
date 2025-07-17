@@ -336,7 +336,7 @@ float LakeMap::CalculateInflow(LakeModelImpl *lake, std::vector<float> *currentQ
         InletConfigSection *inlet = lakeInlets[lakeIndex][i];
         if (inlet && currentTime) {
           float inletQ = inlet->GetObserved(currentTime);
-          if (!std::isnan(inletQ)) {
+          if (inletQ == inletQ) { // Check for NaN using IEEE 754 property
             totalInflow += inletQ;
           } else {
             // If inlet has no Q value at this timestep, assume Q = 0
@@ -345,6 +345,7 @@ float LakeMap::CalculateInflow(LakeModelImpl *lake, std::vector<float> *currentQ
         }
       }
       
+      INFO_LOGF("Lake %s: Using inlet-based inflow = %.6f m³/s", lake->GetLakeName().c_str(), totalInflow);
       return totalInflow; // Return sum of all inlets (not average)
     }
   }
@@ -363,7 +364,8 @@ float LakeMap::CalculateInflow(LakeModelImpl *lake, std::vector<float> *currentQ
       }
     }
     if (nodeIdx >= 0 && nodeIdx < (int)currentQ->size()) {
-      return (*currentQ)[nodeIdx];
+      float lakeCellQ = (*currentQ)[nodeIdx];
+      return lakeCellQ;
     }
     return 0.0f;
   }
@@ -385,12 +387,14 @@ float LakeMap::CalculateInflow(LakeModelImpl *lake, std::vector<float> *currentQ
       }
     }
     if (nodeIdx >= 0 && nodeIdx < (int)currentQ->size()) {
-      inflow += (*currentQ)[nodeIdx];
+      float neighborQ = (*currentQ)[nodeIdx];
+      inflow += neighborQ;
       neighborCount++;
     }
   }
   
-  return (neighborCount > 0) ? (inflow / neighborCount) : 0.0f;
+  float avgInflow = (neighborCount > 0) ? (inflow / neighborCount) : 0.0f;
+  return avgInflow;
 }
 
 

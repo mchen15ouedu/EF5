@@ -7,6 +7,8 @@
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
+#include <cctype>
+#include <algorithm>
 #include "Messages.h"
 #include "DatedName.h"
 #include "BasicGrids.h"
@@ -93,21 +95,26 @@ bool LakeModelImpl::InitializeModel(std::vector<GridNode> *newNodes,
     lakeNodeIndex = -1;
     
     // Use the grid location that was set by LakeMap::FindLakeLocations()
+    INFO_LOGF("Lake %s: Initializing with grid location (%ld, %ld)", lakeName.c_str(), gridLoc.x, gridLoc.y);
+    
     if (gridLoc.x >= 0 && gridLoc.y >= 0) {
         // Find the node that matches the grid coordinates
         for (size_t i = 0; i < nodes->size(); i++) {
             GridNode& node = nodes->at(i);
             if (node.x == gridLoc.x && node.y == gridLoc.y) {
                 lakeNodeIndex = i;
+                INFO_LOGF("Lake %s: Found matching node at index %lu", lakeName.c_str(), (unsigned long)i);
                 break;
             }
         }
     }
     
+
+    
     // Fallback: if no location found, use first node (for backward compatibility)
     if (lakeNodeIndex == -1) {
         lakeNodeIndex = 0;
-        printf("Warning: LakeModelImpl::InitializeModel: Using fallback node 0 for lake %s\n", lakeName.c_str());
+        INFO_LOGF("Lake %s: Using fallback node 0 (no grid location found)", lakeName.c_str());
     }
     
     if (lakeNodeIndex == -1) {
@@ -127,6 +134,9 @@ bool LakeModelImpl::InitializeModel(std::vector<GridNode> *newNodes,
     lakeNode.th_volume = th_volume;
     lakeNode.wm_flag = wm_flag;
     
+    INFO_LOGF("Lake %s: Initialized with storage=%.6f m³ (%.6f km³), area=%.6f m² (%.6f km²), th_volume=%.6f m³ (%.6f km³)", 
+              lakeName.c_str(), storage, storage/1e9, area, area/1e6, th_volume, th_volume/1e9);
+    
     // Use the retention constant from LakeInfo (no need to carve to grid)
     lakeNode.retentionConstant = retentionConstant;
     INFO_LOGF("Lake %s: Using retention constant (klake) = %.6f from LakeInfo", 
@@ -135,6 +145,8 @@ bool LakeModelImpl::InitializeModel(std::vector<GridNode> *newNodes,
     // Initialize state arrays
     lakeNode.states[STATE_LAKE_STORAGE] = static_cast<float>(storage);
     lakeNode.states[STATE_LAKE_OUTFLOW] = static_cast<float>(outflow);
+    
+
     
     return true;
 }
@@ -198,13 +210,11 @@ void LakeModelImpl::InitializeStates(TimeVar *beginTime, char *statePath) {
     
     // If state files were not found, set default values
     if (!foundStorageState && lakeNodeIndex >= 0 && lakeNodeIndex < (int)nodes->size()) {
-        // Set storage to th_volume (normal operating level)
-        storage = th_volume;
+        // Set storage to 80% of th_volume (more realistic initial condition)
+        storage = th_volume * 0.8;
         LakeGridNode *cNode = &lakeNodes[lakeNodeIndex];
         cNode->storage = storage;
         cNode->states[STATE_LAKE_STORAGE] = static_cast<float>(storage);
-        INFO_LOGF("Lake %s: Using default storage = th_volume (%.6f m3)", 
-                 lakeName.c_str(), storage);
     }
     
     if (!foundOutflowState && lakeNodeIndex >= 0 && lakeNodeIndex < (int)nodes->size()) {
@@ -332,12 +342,16 @@ void LakeModelImpl::ApplyVerticalBalance(float stepHours, std::vector<float>* pr
     // This handles the vertical water exchange with the atmosphere
     
     if (!precip || !pet || lakeNodeIndex < 0 || lakeNodeIndex >= (int)precip->size()) {
+        INFO_LOGF("Lake %s: Vertical balance skipped - invalid parameters (lakeNodeIndex=%d, precipSize=%lu)", 
+                  lakeName.c_str(), lakeNodeIndex, precip ? precip->size() : 0);
         return;
     }
     
     // Get precipitation and PET values at the lake location
     this->precipitation = static_cast<double>((*precip)[lakeNodeIndex]);
     this->evaporation = static_cast<double>((*pet)[lakeNodeIndex]);
+    
+
     this->dt = static_cast<double>(stepHours * 3600.0); // Convert hours to seconds
     
     // Convert precipitation and evaporation from mm to m³
@@ -349,6 +363,8 @@ void LakeModelImpl::ApplyVerticalBalance(float stepHours, std::vector<float>* pr
     
     // Ensure storage doesn't go negative
     if (storage < 0) storage = 0;
+    
+
     
     // Update lake node state
     if (lakeNodeIndex >= 0 && lakeNodeIndex < (int)lakeNodes.size()) {
@@ -365,6 +381,8 @@ void LakeModelImpl::ApplyHorizontalBalance(float stepHours, std::vector<float>* 
     // This handles the horizontal water exchange with the river network
     
     if (!currentQ || !nodes || !currentTime || !lakeMap || lakeNodeIndex < 0) {
+        INFO_LOGF("Lake %s: Horizontal balance skipped - lakeNodeIndex=%d, currentQ=%p, nodes=%p, currentTime=%p, lakeMap=%p", 
+                  lakeName.c_str(), lakeNodeIndex, currentQ, nodes, currentTime, lakeMap);
         return;
     }
     
@@ -377,6 +395,8 @@ void LakeModelImpl::ApplyHorizontalBalance(float stepHours, std::vector<float>* 
     // Add inflow to storage
     storage += this->inflow * this->dt;
     
+
+        
     // Calculate outflow based on storage conditions
     double outflowValue = 0.0;
     
@@ -426,6 +446,8 @@ void LakeModelImpl::ApplyHorizontalBalance(float stepHours, std::vector<float>* 
     storage -= outflowValue * this->dt;
     if (storage < 0) storage = 0;
     this->outflow = outflowValue;
+    
+
     
     // Update lake node state
     if (lakeNodeIndex >= 0 && lakeNodeIndex < (int)lakeNodes.size()) {
@@ -538,7 +560,7 @@ void ReadLakeInfoCSV(const std::string& filename, std::map<std::string, LakeInfo
     getline(file, line); // skip header
     while (getline(file, line)) {
         std::istringstream ss(line);
-        std::string nameStr, latStr, lonStr, thVolStr, areaStr, klakeStr, obsFamStr;
+        std::string nameStr, latStr, lonStr, thVolStr, areaStr, klakeStr, obsFamStr, outputtsStr;
         getline(ss, nameStr, ',');
         getline(ss, latStr, ',');
         getline(ss, lonStr, ',');
@@ -546,6 +568,7 @@ void ReadLakeInfoCSV(const std::string& filename, std::map<std::string, LakeInfo
         getline(ss, areaStr, ',');
         getline(ss, klakeStr, ',');
         getline(ss, obsFamStr, ','); // Optional obsFam column
+        getline(ss, outputtsStr, ','); // Optional outputts column
         if (!nameStr.empty() && !latStr.empty() && !lonStr.empty() && 
             !thVolStr.empty() && !areaStr.empty()) {
             LakeInfo info;
@@ -565,6 +588,22 @@ void ReadLakeInfoCSV(const std::string& filename, std::map<std::string, LakeInfo
             } else {
                 info.obsFlowAccum = 0.0;
                 info.obsFlowAccumSet = false;
+            }
+            // Set outputts flag (optional, default to false)
+            if (!outputtsStr.empty()) {
+                // Trim whitespace from outputtsStr
+                std::string trimmedOutputts = outputtsStr;
+                // Remove leading whitespace
+                trimmedOutputts.erase(0, trimmedOutputts.find_first_not_of(" \t\r\n"));
+                // Remove trailing whitespace
+                trimmedOutputts.erase(trimmedOutputts.find_last_not_of(" \t\r\n") + 1);
+                
+                // Check for Y, y, TRUE, true, 1
+                std::string outputtsLower = trimmedOutputts;
+                std::transform(outputtsLower.begin(), outputtsLower.end(), outputtsLower.begin(), ::tolower);
+                info.outputts = (outputtsLower == "y" || outputtsLower == "true" || outputtsLower == "1");
+            } else {
+                info.outputts = false;
             }
             lakeInfoMap[info.name] = info;
         }

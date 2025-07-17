@@ -1,14 +1,15 @@
-# EF5 Control File with Lake CSV Reading Support
-# This example shows how to read multiple lakes from CSV files
+# EF5 Control File with Lake CSV Reading Support - Version 4.2.0
+# This example shows how to use the enhanced lake module with CSV configuration
+# Features: Multiple lakes, engineered discharge, calibration, state saving
 
 # Lake Module Configuration
 LakeModule=true
 
-# Lakes CSV file (alternative to LakeParamSet when LakeModule=true)
+# Lakes CSV file (contains lake parameters with automatic unit conversion)
 lakes_csv=lakes.csv
 
-# Optional: Engineered discharge CSV file
-engineered_discharge_csv=engineered_discharge.csv
+# Optional: Engineered discharge CSV file (for dam-controlled outflow)
+engineered_discharge_csv=sample_inletA_lake1.csv
 
 [basic]
 dem: dem.asc
@@ -19,8 +20,10 @@ projection: geographic
 [basin basin1]
 gauge: gauge1
 gauge: gauge2
+# Lakes can be specified via CSV file (recommended for multiple lakes)
 lakes_csv: lakes.csv
-engineered_discharge_csv: engineered_discharge.csv
+# Optional: Engineered discharge for dam-controlled outflow
+engineered_discharge_csv: sample_inletA_lake1.csv
 
 [gauge gauge1]
 lat: 45.123
@@ -48,13 +51,26 @@ file: pet.nc
 unit_time: 1H
 unit_value: mm
 
+# Lake calibration parameters (optional - for calibration runs)
+[lake_cali_param lake_calibration]
+lake_name: Lake1
+klake: 1.0,100.0  # min,max values for klake parameter
+
 [task task1]
 style: simu
-model: lake
+model: crest  # Can use any EF5 model with lake module enabled
 basin: basin1
 precip: precip1
 pet: pet1
 output: output
 time_begin: 2024-01-01 00:00:00
 time_end: 2024-01-31 23:59:59
-timestep: 1H 
+timestep: 1H
+# Lake module settings
+lakemodule: true
+# Optional: Lake calibration
+# lake_cali_param: lake_calibration
+# Optional: State saving for restart capability
+# state: ./states
+# state_time: 20240115_12
+# save_states: true 

@@ -4,6 +4,8 @@
 #include <cstring>
 #include <string>
 #include <cstdlib>
+#include <cctype>
+#include <algorithm>
 
 std::map<std::string, LakeConfigSection *> g_lakeConfigs;
 
@@ -11,7 +13,7 @@ LakeConfigSection::LakeConfigSection(const char *nameVal) :
     name(nameVal), lat(0.0f), lon(0.0f), area(0.0f), maxDepth(0.0f), 
     initialLevel(0.0f), thVolume(0.0f), gridNodeIndex(-1), outflow(0.0f), 
     inflow(0.0f), storage(0.0f), precipitation(0.0f), evaporation(0.0f), 
-    retentionConstant(0.0f), obsFlowAccum(0.0f), obsFlowAccumSet(false) {}
+    retentionConstant(0.0f), obsFlowAccum(0.0f), obsFlowAccumSet(false), outputts(false) {}
 
 LakeConfigSection::~LakeConfigSection() {}
 
@@ -46,6 +48,12 @@ CONFIG_SEC_RET LakeConfigSection::ProcessKeyValue(char *key, char *value) {
     } else if (strcasecmp(key, "obsFam") == 0) {
         obsFlowAccum = static_cast<float>(atof(value));
         obsFlowAccumSet = true;
+        return VALID_RESULT;
+    } else if (strcasecmp(key, "outputts") == 0) {
+        // Check for Y, y, TRUE, true, 1
+        std::string valStr = value;
+        std::transform(valStr.begin(), valStr.end(), valStr.begin(), ::tolower);
+        outputts = (valStr == "y" || valStr == "true" || valStr == "1");
         return VALID_RESULT;
     }
     return INVALID_RESULT;

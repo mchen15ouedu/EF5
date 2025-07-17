@@ -108,6 +108,10 @@ public:
     float GetObsFlowAccum() const { return obsFlowAccum; }
     bool HasObsFlowAccum() const { return obsFlowAccumSet; }
     
+    // Output time series flag for lake volume
+    void SetOutputTS(bool value) { outputts = value; }
+    bool GetOutputTS() const { return outputts; }
+    
     // Calculate linear reservoir outflow for dry season (when storage <= th_volume)
     float CalculateLinearReservoirOutflow(float dt) {
         if (storage <= 0.0f || retentionConstant <= 0.0f) {
@@ -161,6 +165,7 @@ private:
     float retentionConstant;
     float obsFlowAccum;
     bool obsFlowAccumSet;
+    bool outputts;
     std::vector<LakeInlet> inlets;
 };
 

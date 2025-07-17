@@ -483,7 +483,7 @@ bool Simulator::InitializeSimu(TaskConfigSection *task) {
         if (outputRP) {
           fprintf(gaugeOutputs[i], "%s", ",Return Period(y)");
         }
-        if (task->IsLakeModuleEnabled()) {
+        if (task->IsLakeModuleEnabled() && HasLakesWithOutputTS()) {
           fprintf(gaugeOutputs[i], "%s", ",Lake_Vol(m^3)");
         }
         fprintf(gaugeOutputs[i], "%s", "\n");
@@ -1116,7 +1116,7 @@ void Simulator::SaveTSOutput() {
                 GetReturnPeriod(currentQ[gauge->GetGridNodeIndex()],
                                 &(rpData[gauge->GetGridNodeIndex()])));
       }
-      if (task->IsLakeModuleEnabled()) {
+      if (task->IsLakeModuleEnabled() && HasLakesWithOutputTS()) {
         fprintf(gaugeOutputs[i], ",%.2f", currentLakeVolume[gauge->GetGridNodeIndex()]);
       }
       fprintf(gaugeOutputs[i], "%s", "\n");
@@ -1411,6 +1411,16 @@ void Simulator::SimulateDistributed(bool trackPeaks) {
   if (task->GetModel() == MODEL_LAKE) {
     wbModel->InitializeModel(&nodes, NULL, NULL);
   }
+  
+  // Initialize additional lake models (when using non-lake water balance model)
+  if (task->IsLakeModuleEnabled() && task->GetModel() != MODEL_LAKE) {
+    for (size_t l = 0; l < lakeModels.size(); ++l) {
+      LakeModelImpl* lake = lakeModels[l];
+      if (lake) {
+        lake->InitializeModel(&nodes, NULL, NULL);
+      }
+    }
+  }
   if (griddedOutputs != OG_NONE || trackPeaks || outputRP || saveStates) {
     gridWriter.Initialize();
   }
@@ -1602,6 +1612,47 @@ void Simulator::SimulateDistributed(bool trackPeaks) {
       NORMAL_LOGF(" %f routing sec", endTimeR - beginTimeR);
 #endif
 #endif
+      
+      // Log lake volume and outflow for lakes with outputts=true on the same line
+      if (task->IsLakeModuleEnabled() && HasLakesWithOutputTS()) {
+        // Log main lake model
+        LakeModelImpl* mainLakeModel = dynamic_cast<LakeModelImpl*>(wbModel);
+        if (mainLakeModel) {
+          NORMAL_LOGF(" %s: vol=%.2f m³ (%.6f km³), outflow=%.2f m³/s", 
+                     mainLakeModel->GetLakeName().c_str(), 
+                     mainLakeModel->GetStorage(), 
+                     mainLakeModel->GetStorage() / 1e9,
+                     mainLakeModel->GetOutflow());
+        }
+        
+        // Log additional lake models
+        for (size_t lakeIdx = 0; lakeIdx < lakeModels.size(); ++lakeIdx) {
+          LakeModelImpl* lake = lakeModels[lakeIdx];
+          if (!lake) continue;
+          
+  
+          
+          // Check if this lake has outputts=true
+          bool hasOutputTS = false;
+          if (task->GetBasinSec()->GetLakes()) {
+            std::vector<LakeInfo> *lakes = task->GetBasinSec()->GetLakes();
+            for (size_t i = 0; i < lakes->size(); i++) {
+              if (lakes->at(i).name == lake->GetLakeName() && lakes->at(i).outputts) {
+                hasOutputTS = true;
+                break;
+              }
+            }
+          }
+          
+          if (hasOutputTS) {
+            NORMAL_LOGF(" %s: vol=%.2f m³ (%.6f km³), outflow=%.2f m³/s", 
+                       lake->GetLakeName().c_str(), 
+                       lake->GetStorage(), 
+                       lake->GetStorage() / 1e9,
+                       lake->GetOutflow());
+          }
+        }
+      }
     } else {
       for (size_t i = 0; i < currentFF.size(); i++) {
         currentFF[i] = 0.0;
@@ -1962,14 +2013,67 @@ void Simulator::SimulateDistributed(bool trackPeaks) {
   fclose(fp);
 
   // Populate lake volume data for output if lake module is enabled
-  if (task->IsLakeModuleEnabled()) {
+  if (task->IsLakeModuleEnabled() && HasLakesWithOutputTS()) {
+    // Initialize all nodes with 0
     for (size_t i = 0; i < nodes.size(); i++) {
-      // Try to cast wbModel to LakeModelImpl to get storage
-      LakeModelImpl* lakeModel = dynamic_cast<LakeModelImpl*>(wbModel);
-      if (lakeModel) {
-        currentLakeVolume[i] = (float)lakeModel->GetStorage();
-      } else {
-        currentLakeVolume[i] = 0.0f; // Default if not a lake model
+      currentLakeVolume[i] = 0.0f;
+    }
+    
+    // Handle main lake model (when using MODEL_LAKE)
+    LakeModelImpl* mainLakeModel = dynamic_cast<LakeModelImpl*>(wbModel);
+    if (mainLakeModel) {
+      // For main lake model, populate at its grid location
+      GridLoc* lakeLoc = mainLakeModel->GetLocation();
+      if (lakeLoc && lakeLoc->x >= 0 && lakeLoc->y >= 0) {
+        // Find the node that matches the lake location
+        for (size_t i = 0; i < nodes.size(); i++) {
+          if (nodes[i].x == lakeLoc->x && nodes[i].y == lakeLoc->y) {
+            currentLakeVolume[i] = (float)mainLakeModel->GetStorage();
+            // Log lake volume for diagnostic purposes
+            INFO_LOGF("Lake %s (main model): Volume = %.2f m³ at grid (%ld, %ld)", 
+                     mainLakeModel->GetLakeName().c_str(), 
+                     mainLakeModel->GetStorage(), 
+                     lakeLoc->x, lakeLoc->y);
+            break;
+          }
+        }
+      }
+    }
+    
+    // Handle additional lakes (when using non-lake water balance model)
+    for (size_t l = 0; l < lakeModels.size(); ++l) {
+      LakeModelImpl* lake = lakeModels[l];
+      if (!lake) continue;
+      
+      // Check if this lake has outputts=true
+      bool hasOutputTS = false;
+      if (task->GetBasinSec()->GetLakes()) {
+        std::vector<LakeInfo> *lakes = task->GetBasinSec()->GetLakes();
+        for (size_t i = 0; i < lakes->size(); i++) {
+          if (lakes->at(i).name == lake->GetLakeName() && lakes->at(i).outputts) {
+            hasOutputTS = true;
+            break;
+          }
+        }
+      }
+      
+      if (hasOutputTS) {
+        // Populate at this lake's grid location
+        GridLoc* lakeLoc = lake->GetLocation();
+        if (lakeLoc && lakeLoc->x >= 0 && lakeLoc->y >= 0) {
+          // Find the node that matches the lake location
+          for (size_t i = 0; i < nodes.size(); i++) {
+            if (nodes[i].x == lakeLoc->x && nodes[i].y == lakeLoc->y) {
+              currentLakeVolume[i] = (float)lake->GetStorage();
+              // Log lake volume for diagnostic purposes
+              INFO_LOGF("Lake %s (additional): Volume = %.2f m³ at grid (%ld, %ld)", 
+                       lake->GetLakeName().c_str(), 
+                       lake->GetStorage(), 
+                       lakeLoc->x, lakeLoc->y);
+              break;
+            }
+          }
+        }
       }
     }
   }
@@ -2594,4 +2698,18 @@ bool Simulator::InitializeGridParams(TaskConfigSection *task) {
 
 
   return true;
+}
+
+bool Simulator::HasLakesWithOutputTS() {
+  // Check if any lakes have outputts=true
+  if (task->IsLakeModuleEnabled() && task->GetBasinSec()->GetLakes()) {
+    std::vector<LakeInfo> *lakes = task->GetBasinSec()->GetLakes();
+    
+    for (size_t i = 0; i < lakes->size(); i++) {
+      if (lakes->at(i).outputts) {
+        return true;
+      }
+    }
+  }
+  return false;
 }

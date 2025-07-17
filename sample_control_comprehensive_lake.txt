@@ -1,0 +1,124 @@
+# EF5 Comprehensive Lake Module Example - Version 4.2.0
+# This example demonstrates all lake module features:
+# - Multiple lakes with CSV configuration
+# - Engineered discharge for dam control
+# - Lake calibration with DREAM algorithm
+# - State saving and restart capability
+# - Integration with all EF5 water balance models
+
+[BASIC]
+DEM = data/dem.tif
+DDM = data/ddm.tif
+FAM = data/fam.tif
+Projection = EPSG:4326
+
+[BASIN ComprehensiveBasin]
+# Multiple gauges for validation
+Gauge = MainGauge
+Gauge = SecondaryGauge
+# Lakes configuration via CSV (recommended for multiple lakes)
+lakes_csv = lakes.csv
+# Engineered discharge for dam-controlled outflow
+engineered_discharge_csv = sample_inletA_lake1.csv
+
+[GAUGE MainGauge]
+Lat = 45.123
+Lon = -122.456
+FlowAccum = 1000
+CellX = 100
+CellY = 200
+OutputTS = true
+
+[GAUGE SecondaryGauge]
+Lat = 45.234
+Lon = -122.567
+FlowAccum = 2000
+CellX = 150
+CellY = 250
+OutputTS = true
+
+[PRECIPFORCING PrecipData]
+File = data/precip.nc
+Unit_Time = 1H
+Unit_Value = mm
+
+[PETFORCING PETData]
+File = data/pet.nc
+Unit_Time = 1H
+Unit_Value = mm
+
+# Lake calibration parameters for DREAM algorithm
+[lake_cali_param lake_calibration]
+lake_name = Lake1
+klake = 1.0,100.0  # min,max values for klake parameter (hours)
+
+# Simulation task with lake module
+[TASK LakeSimulation]
+Model = CREST  # Can use CREST, SAC, HP, HyMOD, or LAKE
+Basin = ComprehensiveBasin
+Precip = PrecipData
+PET = PETData
+Output = output/lake_simulation
+Time_Begin = 2024-01-01 00:00:00
+Time_End = 2024-01-31 23:59:59
+TimeStep = 1H
+# Lake module configuration
+LakeModule = true
+# Optional: Lake calibration
+# lake_cali_param = lake_calibration
+# Optional: State saving for restart capability
+# State = ./states
+# State_Time = 20240115_12
+# Save_States = true
+
+# Calibration task with lake module
+[TASK LakeCalibration]
+Model = CREST
+Basin = ComprehensiveBasin
+Precip = PrecipData
+PET = PETData
+Output = output/lake_calibration
+Time_Begin = 2020-01-01 00:00:00
+Time_End = 2020-12-31 23:59:59
+TimeStep = 1H
+Style = CALI_DREAM
+# Lake module configuration
+LakeModule = true
+# Lake calibration parameters
+lake_cali_param = lake_calibration
+# State saving for restart capability
+State = ./states
+State_Time = 20200601_00
+Save_States = true
+
+# Lake Module Features in EF5 v4.2.0:
+# =====================================
+# 1. CSV Configuration:
+#    - lakes.csv: name,lat,lon,th_volume,area,klake,obsFam
+#    - Automatic unit conversion: km³/km² to m³/m²
+#    - Support for multiple lakes in single simulation
+#
+# 2. Engineered Discharge:
+#    - CSV format: timestamp,lake1,lake2,lake3
+#    - Dam-controlled outflow specification
+#    - Time-varying discharge control
+#
+# 3. Lake Calibration:
+#    - DREAM algorithm integration
+#    - Calibrate klake parameter
+#    - Support for observed flow accumulation (obsFam)
+#
+# 4. State Management:
+#    - Automatic state saving/loading
+#    - Grid-based state files: lake_storage_YYYYMMDD_HHUU.tif
+#    - Restart capability from any saved state
+#
+# 5. Model Integration:
+#    - Works with all EF5 water balance models
+#    - Not limited to standalone lake model
+#    - Backward compatibility maintained
+#
+# 6. Output Features:
+#    - Lake volume time series in gauge output
+#    - Gridded lake storage and outflow maps
+#    - Integration with existing EF5 output system 

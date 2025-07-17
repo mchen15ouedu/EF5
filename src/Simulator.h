@@ -52,6 +52,8 @@ private:
   void AssimilateData();
   void OutputCombinedOutput();
 
+  bool HasLakesWithOutputTS(); // Check if any lakes have outputts=true
+
   bool ReadThresFile(char *file, std::vector<GridNode> *nodes,
                      std::vector<float> *thresVals);
   float ComputeThresValue(float discharge, float action, float minor,
