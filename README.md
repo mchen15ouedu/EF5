@@ -64,7 +64,7 @@ ThVolume = 0.5    ; km³ (converted to m³ internally)
 Klake = 24.0      ; hours
 
 # Optional engineered discharge file
-LAKEOUTFLOWFILE "engineered_discharge.csv"
+LAKEOUTFLOWFILE = /engineered_discharge.csv"
 
 # Lake calibration parameters
 [LAKE_CALI_PARAM lake_cali_example]
