@@ -3,17 +3,69 @@
 #include "BifGrid.h"
 #include "Messages.h"
 #include "TifGrid.h"
+#include "GridWriterFull.h"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include "DatedName.h"
+#include <map>
 
 void TempReader::ReadDEM(char *file) {
   tempDEM = ReadFloatTifGrid(file);
   if (!tempDEM) {
     WARNING_LOGF("Failed to load temperature grid DEM %s\n", file);
   } else {
-    INFO_LOGF("Successfully loaded temperature grid DEM %s\n", file);
+    // Successfully loaded temperature grid DEM without logging
   }
+}
+
+void TempReader::EnsureElevationCorrection(FloatGrid *tempGrid, std::vector<GridNode> *nodes) {
+  if (elevCorrInitialized && temMod.size() == nodes->size() &&
+      temModCols == tempGrid->numCols && temModRows == tempGrid->numRows) {
+    return;
+  }
+  temMod.resize(nodes->size());
+  temModCols = tempGrid->numCols;
+  temModRows = tempGrid->numRows;
+
+  // Compute minimum DEM elevation only for tempGrid pixels overlapping the basin
+  std::map<long long, float> minElevByPixel;
+
+  GridLoc pt;
+  for (size_t i = 0; i < nodes->size(); i++) {
+    GridNode *node = &(nodes->at(i));
+    if (tempGrid->GetGridLoc(node->refLoc.x, node->refLoc.y, &pt)) {
+      long long key = (((long long)pt.y) << 32) | (unsigned long)pt.x;
+      float elev = g_DEM->data[node->y][node->x];
+      std::map<long long, float>::iterator it = minElevByPixel.find(key);
+      if (it == minElevByPixel.end()) {
+        minElevByPixel.insert(std::make_pair(key, elev));
+      } else if (elev < it->second) {
+        it->second = elev;
+      }
+    }
+  }
+
+  // Build per-node temperature modifier: -0.0065 * (elev - minElev(pixel))
+  for (size_t i = 0; i < nodes->size(); i++) {
+    GridNode *node = &(nodes->at(i));
+    if (tempGrid->GetGridLoc(node->refLoc.x, node->refLoc.y, &pt)) {
+      long long key = (((long long)pt.y) << 32) | (unsigned long)pt.x;
+      float elev = g_DEM->data[node->y][node->x];
+      std::map<long long, float>::iterator it = minElevByPixel.find(key);
+      if (it != minElevByPixel.end()) {
+        float baseElev = it->second;
+        float diffHeight = elev - baseElev; // meters
+        temMod[i] = -0.0065f * diffHeight;
+      } else {
+        temMod[i] = 0.0f;
+      }
+    } else {
+      temMod[i] = 0.0f;
+    }
+  }
+
+  elevCorrInitialized = true;
 }
 
 bool TempReader::Read(char *file, SUPPORTED_TEMP_TYPES type,
@@ -45,6 +97,9 @@ bool TempReader::Read(char *file, SUPPORTED_TEMP_TYPES type,
   case TEMP_TIF:
     tempGrid = ReadFloatTifGrid(file);
     break;
+  case TEMP_BIF:
+    tempGrid = ReadFloatBifGrid(file);
+    break;
   default:
     ERROR_LOG("Unsupported Temp format!");
     break;
@@ -66,38 +121,59 @@ bool TempReader::Read(char *file, SUPPORTED_TEMP_TYPES type,
     strcpy(lastTempFile, file);
   }
 
-  // We have two options now... Either the temp grid & the basic grids are the
-  // same Or they are different!
-
-  if (g_DEM->IsSpatialMatch(tempGrid)) {
-    // The grids are the same! Our life is easy!
-    for (size_t i = 0; i < nodes->size(); i++) {
-      GridNode *node = &(nodes->at(i));
-      if (tempGrid->data[node->y][node->x] != tempGrid->noData) {
-        currentTemp->at(i) = tempGrid->data[node->y][node->x];
-      } else {
-        currentTemp->at(i) = 0.0;
+  // elevCorr mode: separate from tempDEM logic
+  if (elevCorr) {
+    EnsureElevationCorrection(tempGrid, nodes);
+    if (g_DEM->IsSpatialMatch(tempGrid)) {
+      for (size_t i = 0; i < nodes->size(); i++) {
+        GridNode *node = &(nodes->at(i));
+        if (tempGrid->data[node->y][node->x] != tempGrid->noData) {
+          currentTemp->at(i) = tempGrid->data[node->y][node->x] + temMod[i];
+        } else {
+          currentTemp->at(i) = tempGrid->noData;
+        }
+      }
+    } else {
+      GridLoc pt;
+      for (size_t i = 0; i < nodes->size(); i++) {
+        GridNode *node = &(nodes->at(i));
+        if (tempGrid->GetGridLoc(node->refLoc.x, node->refLoc.y, &pt) &&
+            tempGrid->data[pt.y][pt.x] != tempGrid->noData) {
+          currentTemp->at(i) = tempGrid->data[pt.y][pt.x] + temMod[i];
+        } else {
+          currentTemp->at(i) = tempGrid->noData;
+        }
       }
     }
-
   } else {
-    // The grids are different, we must do some resampling fun.
-    GridLoc pt;
-    for (size_t i = 0; i < nodes->size(); i++) {
-      GridNode *node = &(nodes->at(i));
-      if (tempGrid->GetGridLoc(node->refLoc.x, node->refLoc.y, &pt) &&
-          tempGrid->data[pt.y][pt.x] != tempGrid->noData) {
-        if (tempDEM && tempDEM->IsSpatialMatch(tempGrid)) {
-          float temp = tempGrid->data[pt.y][pt.x];
-          float diffHeight =
-              g_DEM->data[node->y][node->x] - tempDEM->data[pt.y][pt.x];
-          float tempMod = -0.0065 * diffHeight;
-          currentTemp->at(i) = temp + tempMod;
+    // Original behavior (including optional tempDEM lapse)
+    if (g_DEM->IsSpatialMatch(tempGrid)) {
+      for (size_t i = 0; i < nodes->size(); i++) {
+        GridNode *node = &(nodes->at(i));
+        if (tempGrid->data[node->y][node->x] != tempGrid->noData) {
+          currentTemp->at(i) = tempGrid->data[node->y][node->x];
         } else {
-          currentTemp->at(i) = tempGrid->data[pt.y][pt.x];
+          currentTemp->at(i) = 0.0f;
         }
-      } else {
-        currentTemp->at(i) = 0.0;
+      }
+    } else {
+      GridLoc pt;
+      for (size_t i = 0; i < nodes->size(); i++) {
+        GridNode *node = &(nodes->at(i));
+        if (tempGrid->GetGridLoc(node->refLoc.x, node->refLoc.y, &pt) &&
+            tempGrid->data[pt.y][pt.x] != tempGrid->noData) {
+          if (tempDEM && tempDEM->IsSpatialMatch(tempGrid)) {
+            float temp = tempGrid->data[pt.y][pt.x];
+            float diffHeight =
+                g_DEM->data[node->y][node->x] - tempDEM->data[pt.y][pt.x];
+            float tempMod = -0.0065f * diffHeight;
+            currentTemp->at(i) = temp + tempMod;
+          } else {
+            currentTemp->at(i) = tempGrid->data[pt.y][pt.x];
+          }
+        } else {
+          currentTemp->at(i) = 0.0f;
+        }
       }
     }
   }
@@ -105,5 +181,21 @@ bool TempReader::Read(char *file, SUPPORTED_TEMP_TYPES type,
   // We don't actually need to keep the PET grid in memory anymore
   delete tempGrid;
 
+  return true;
+}
+
+bool TempReader::SaveElevCorrState(TimeVar *currentTime, char *statePath, GridWriterFull *gridWriter,
+                                   std::vector<GridNode> *nodes) {
+  if (!elevCorr || !elevCorrInitialized || temMod.size() != nodes->size()) {
+    return false;
+  }
+  DatedName timeStr;
+  timeStr.SetNameStr("YYYYMMDD_HHUU");
+  timeStr.ProcessNameLoose(NULL);
+  timeStr.UpdateName(currentTime->GetTM());
+  char buffer[300];
+  sprintf(buffer, "%s/%s_%s.tif", statePath, "temmod", timeStr.GetName());
+  gridWriter->WriteGrid(nodes, &temMod, buffer, false);
+  elevCorrSaved = true;
   return true;
 }

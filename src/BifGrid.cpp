@@ -32,6 +32,8 @@ FloatGrid *ReadFloatBifGrid(char *file) {
   grid->cellSize = header.cellsize;
   grid->extent.bottom = header.yllcor;
   grid->extent.left = header.xllcor;
+  grid->noData = header.nodata; // Previously left uninitialized; required so
+                                // readers can detect missing cells in BIF grids.
 
   grid->data = new float *[grid->numRows]();
   if (!grid->data) {

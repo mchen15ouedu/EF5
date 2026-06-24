@@ -23,10 +23,28 @@ struct LakeInfo {
     double obsFlowAccum; // Observed flow accumulation (optional)
     bool obsFlowAccumSet; // Flag indicating if observed flow accumulation is set
     bool outputts; // Flag indicating if lake volume should be output in gauge files
+    double param_a; // Retention time in hours for linear reservoir equation: O = (1/(a*3600)) * S * (S/th_volume)^b
+    double param_b; // Parameter b for linear reservoir equation: O = (1/(a*3600)) * S * (S/th_volume)^b
     
     // Default constructor for proper initialization
     LakeInfo() : lat(0.0), lon(0.0), th_volume(0.0), area(0.0), 
-                 retention_constant(24.0), obsFlowAccum(0.0), obsFlowAccumSet(false), outputts(false) {}
+                 retention_constant(24.0), obsFlowAccum(0.0), obsFlowAccumSet(false), outputts(false),
+                 param_a(0.0), param_b(1.5) {} // Default b = 1.5
+    
+    // Calculate parameter b based on th_volume (input value in km³)
+    static double CalculateParamB(double th_volume_km3) {
+        if (th_volume_km3 > 1.5) {
+            return 2.0;
+        } else if (th_volume_km3 > 1.0) {
+            return 1.8;
+        } else if (th_volume_km3 < 0.05) {
+            return 1.0;
+        } else if (th_volume_km3 < 0.1) {
+            return 1.2;
+        } else {
+            return 1.5; // Default for 0.1 <= th_volume <= 1.0
+        }
+    }
 };
 
 // Lake state enumeration
@@ -51,12 +69,14 @@ struct LakeGridNode : BasicGridNode {
     double evaporation;  // Evaporation (mm or m)
     double th_volume;   // Threshold volume (m^3)
     double retentionConstant; // Retention constant K (hours)
+    double param_a; // Retention time in hours for linear reservoir equation: O = (1/(a*3600)) * S * (S/th_volume)^b
+    double param_b; // Parameter b for linear reservoir equation: O = (1/(a*3600)) * S * (S/th_volume)^b
     bool wm_flag;        // Use engineered discharge if true
     
     // Default constructor for proper initialization
     LakeGridNode() : storage(0.0), area(0.0), outflow(0.0), inflow(0.0),
                      precipitation(0.0), evaporation(0.0), th_volume(0.0),
-                     retentionConstant(24.0), wm_flag(false) {
+                     retentionConstant(24.0), param_a(0.0), param_b(1.5), wm_flag(false) {
         // Initialize parameter and state arrays
         for (int i = 0; i < PARAM_LAKE_QTY; i++) {
             params[i] = 0.0f;
@@ -131,11 +151,17 @@ public:
     
     // Linear reservoir parameter for dry season outflow
     double retentionConstant; // Retention constant K (hours)
+    double param_a; // Retention time in hours for linear reservoir equation: O = (1/(a*3600)) * S * (S/th_volume)^b
+    double param_b; // Parameter b for linear reservoir equation: O = (1/(a*3600)) * S * (S/th_volume)^b
     
     // Grid-based state management
     std::vector<GridNode> *nodes;
-    std::vector<LakeGridNode> lakeNodes;
-    int lakeNodeIndex; // Index of the grid node where this lake is located
+    LakeGridNode lakeNode; // State for the single grid node this lake occupies.
+                           // Previously a vector sized to the whole grid (one
+                           // entry per lake x per node) which blew up memory on
+                           // large/global domains -- now a single struct.
+    int lakeNodeIndex; // Index into 'nodes' of the grid cell where this lake sits
+    bool warnedDtResidence; // guard so the dt>residence-time warning fires once
     
     // Location and flow accumulation (similar to gauges)
     double lat;
@@ -177,7 +203,23 @@ public:
     
     // Linear reservoir parameter for dry season outflow
     double retentionConstant; // Retention constant K (hours)
+    double param_a; // Retention time in hours for linear reservoir equation: O = (1/(a*3600)) * S * (S/th_volume)^b
+    double param_b; // Parameter b for linear reservoir equation: O = (1/(a*3600)) * S * (S/th_volume)^b
 };
+
+// Helper functions for lake calculations
+namespace LakeCalculations {
+    // Calculate linear reservoir outflow: O = (1/(a*3600)) * S * (S/th_volume)^b
+    // where a is retention time in hours, converted to seconds
+    double CalculateLinearReservoirOutflow(double storage, double th_volume, double param_a, double param_b);
+    
+    // Get engineered discharge for a given timestamp
+    double GetEngineeredDischarge(const std::string& timestamp, bool wm_flag, 
+                                   std::map<std::string, double>* engineeredDischarge);
+    
+    // Convert timestamp from TimeVar to string format "YYYYMMDD_HHUU"
+    std::string TimeVarToTimestamp(TimeVar* currentTime);
+}
 
 // CSV utility for reading engineered discharge
 void ReadEngineeredDischargeCSV(const std::string& filename, std::map<std::string, double>& dischargeMap);

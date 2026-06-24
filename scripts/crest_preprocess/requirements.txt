@@ -1,0 +1,19 @@
+# CREST input data pre-process -- dependencies
+#
+# Core (always required):
+numpy>=1.20
+rasterio>=1.2          # bundles GDAL -> 155+ raster drivers (GeoTIFF, GRIB, BIL, HDF, ...)
+
+# Scientific multi-dimensional inputs (netCDF / GRIB / HDF / Zarr with a named
+# variable and time/level dimensions). Install the ones you need:
+xarray>=2022.3
+rioxarray>=0.11        # best CRS/transform handling for the scientific path
+netCDF4>=1.5           # netCDF engine for xarray
+h5netcdf>=1.0          # alternative netCDF/HDF5 engine
+cfgrib>=0.9            # GRIB1/GRIB2 engine for xarray (needs ecCodes)
+zarr>=2.10             # Zarr stores
+pandas>=1.3            # time-coordinate handling for convert-ts
+
+# Tip: a single conda env is the least painful way to get GDAL + ecCodes:
+#   conda create -n crest_pre -c conda-forge rasterio rioxarray xarray \
+#       netcdf4 cfgrib zarr pandas

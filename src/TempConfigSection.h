@@ -22,6 +22,7 @@ public:
   char *GetDEM() { return dem; }
   TimeUnit *GetUnitTime() { return unit.GetTime(); }
   SUPPORTED_TEMP_TYPES GetType() { return type.GetType(); }
+  bool GetElevCorr() const { return elevCorr; }
   CONFIG_SEC_RET ProcessKeyValue(char *name, char *value);
   CONFIG_SEC_RET ValidateSection();
 
@@ -35,6 +36,7 @@ private:
   TimeUnit freq;
   DistancePerTimeUnits unit;
   TempType type;
+  bool elevCorr;
 };
 
 extern std::map<std::string, TempConfigSection *> g_tempConfigs;

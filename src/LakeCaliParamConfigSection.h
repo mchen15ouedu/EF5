@@ -24,6 +24,7 @@ public:
   // Get parameter name string
   const char* GetParamString(int index) const { 
     if (index == 0) return "klake"; 
+    if (index == 1) return "b";
     return "unknown"; 
   }
 

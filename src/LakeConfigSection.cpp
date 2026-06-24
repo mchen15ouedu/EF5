@@ -13,7 +13,7 @@ LakeConfigSection::LakeConfigSection(const char *nameVal) :
     name(nameVal), lat(0.0f), lon(0.0f), area(0.0f), maxDepth(0.0f), 
     initialLevel(0.0f), thVolume(0.0f), gridNodeIndex(-1), outflow(0.0f), 
     inflow(0.0f), storage(0.0f), precipitation(0.0f), evaporation(0.0f), 
-    retentionConstant(0.0f), obsFlowAccum(0.0f), obsFlowAccumSet(false), outputts(false) {}
+    retentionConstant(0.0f), param_a(0.0f), param_b(1.5f), obsFlowAccum(0.0f), obsFlowAccumSet(false), outputts(false) {}
 
 LakeConfigSection::~LakeConfigSection() {}
 

@@ -1,6 +1,7 @@
 #include "BasicGrids.h"
 #include "AscGrid.h"
 #include "BasicConfigSection.h"
+#include "BifGrid.h"
 #include "Defines.h"
 #include "Messages.h"
 #include "TifGrid.h"
@@ -67,6 +68,8 @@ bool LoadBasicGrids() {
   char *ext = strrchr(g_basicConfig->GetDEM(), '.');
   if (!strcasecmp(ext, ".asc")) {
     g_DEM = ReadFloatAscGrid(g_basicConfig->GetDEM());
+  } else if (!strcasecmp(ext, ".bif")) {
+    g_DEM = ReadFloatBifGrid(g_basicConfig->GetDEM());
   } else {
     g_DEM = ReadFloatTifGrid(g_basicConfig->GetDEM());
   }
@@ -79,6 +82,8 @@ bool LoadBasicGrids() {
   ext = strrchr(g_basicConfig->GetDDM(), '.');
   if (!strcasecmp(ext, ".asc")) {
     g_DDM = ReadFloatAscGrid(g_basicConfig->GetDDM());
+  } else if (!strcasecmp(ext, ".bif")) {
+    g_DDM = ReadFloatBifGrid(g_basicConfig->GetDDM());
   } else {
     g_DDM = ReadFloatTifGrid(g_basicConfig->GetDDM());
   }
@@ -95,6 +100,8 @@ bool LoadBasicGrids() {
   ext = strrchr(g_basicConfig->GetFAM(), '.');
   if (!strcasecmp(ext, ".asc")) {
     g_FAM = ReadFloatAscGrid(g_basicConfig->GetFAM());
+  } else if (!strcasecmp(ext, ".bif")) {
+    g_FAM = ReadFloatBifGrid(g_basicConfig->GetFAM());
   } else {
     g_FAM = ReadFloatTifGrid(g_basicConfig->GetFAM());
   }
@@ -1139,8 +1146,7 @@ void CarveLakeParameters(BasinConfigSection *basin, std::vector<GridNode> *nodes
       GridNode& node = nodes->at(j);
       if (node.x == lakeLoc.x && node.y == lakeLoc.y) {
         // Found the lake node - log the location for debugging
-        INFO_LOGF("Found lake %s at grid node (%ld, %ld) with retention constant (klake) = %.6f", 
-                  lake.name.c_str(), node.x, node.y, lake.retention_constant);
+        // Found lake at grid node without logging
         break;
       }
     }

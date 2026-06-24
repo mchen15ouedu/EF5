@@ -26,6 +26,9 @@ private:
   std::map<LakeModelImpl *, size_t> lakeMap;
   std::vector<std::vector<GridLoc> > lakeNeighbors;
   std::vector<std::vector<InletConfigSection *> > lakeInlets;
+  // (y<<32 | x) -> index into the nodes vector, built once and reused so
+  // CalculateInflow no longer scans all nodes per neighbor per lake per step.
+  std::map<long long, int> nodeIndexByLoc;
 };
 
 #endif 

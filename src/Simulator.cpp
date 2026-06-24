@@ -271,11 +271,11 @@ bool Simulator::InitializeBasic(TaskConfigSection *task) {
     if (basinLakes && !basinLakes->empty()) {
       // Use the first lake from the basin configuration
       wbModel = new LakeModelImpl(basinLakes->at(0), false, basinEngineeredDischarge);
-      INFO_LOGF("Created lake model for lake: %s", basinLakes->at(0).name.c_str());
+      // Lake model created without logging
     } else {
       // Fall back to default lake info
       wbModel = new LakeModelImpl(LakeInfo(), false, NULL);
-      INFO_LOGF("%s", "Created default lake model (no lakes defined in basin)");
+      // Default lake model created without logging
     }
     break;
   }
@@ -1230,7 +1230,7 @@ bool Simulator::ReadThresFile(char *file, std::vector<GridNode> *nodes,
   // Or they are different!
 
   if (g_DEM->IsSpatialMatch(grid)) {
-    INFO_LOGF("Loading exact match threshold grid %s", file);
+    // Loading exact match threshold grid without logging
     // The grids are the same! Our life is easy!
     for (size_t i = 0; i < nodes->size(); i++) {
       GridNode *node = &(nodes->at(i));
@@ -1242,7 +1242,7 @@ bool Simulator::ReadThresFile(char *file, std::vector<GridNode> *nodes,
     }
 
   } else {
-    INFO_LOGF("Threshold grids aren't an exact match so guessing! %s", file);
+    // Threshold grids not exact match without logging
     // The grids are different, we must do some resampling fun.
     GridLoc pt;
     for (size_t i = 0; i < nodes->size(); i++) {
@@ -1339,8 +1339,10 @@ void Simulator::SimulateDistributed(bool trackPeaks) {
   // Initialize TempReader
   if (sModel) {
     tempReader.ReadDEM(tempSec->GetDEM());
+    tempReader.SetElevCorr(tempSec->GetElevCorr());
   } else {
     tempReader.SetNullDEM();
+    tempReader.SetElevCorr(false);
   }
 
   std::vector<float> actionVals, minorVals, moderateVals, majorVals;
@@ -1613,24 +1615,18 @@ void Simulator::SimulateDistributed(bool trackPeaks) {
 #endif
 #endif
       
-      // Log lake volume and outflow for lakes with outputts=true on the same line
+      // Lake volume and outflow logging removed
       if (task->IsLakeModuleEnabled() && HasLakesWithOutputTS()) {
-        // Log main lake model
+        // Main lake model processing (no logging)
         LakeModelImpl* mainLakeModel = dynamic_cast<LakeModelImpl*>(wbModel);
         if (mainLakeModel) {
-          NORMAL_LOGF(" %s: vol=%.2f m³ (%.6f km³), outflow=%.2f m³/s", 
-                     mainLakeModel->GetLakeName().c_str(), 
-                     mainLakeModel->GetStorage(), 
-                     mainLakeModel->GetStorage() / 1e9,
-                     mainLakeModel->GetOutflow());
+          // Volume and outflow processing without logging
         }
         
-        // Log additional lake models
+        // Additional lake models processing (no logging)
         for (size_t lakeIdx = 0; lakeIdx < lakeModels.size(); ++lakeIdx) {
           LakeModelImpl* lake = lakeModels[lakeIdx];
           if (!lake) continue;
-          
-  
           
           // Check if this lake has outputts=true
           bool hasOutputTS = false;
@@ -1645,11 +1641,7 @@ void Simulator::SimulateDistributed(bool trackPeaks) {
           }
           
           if (hasOutputTS) {
-            NORMAL_LOGF(" %s: vol=%.2f m³ (%.6f km³), outflow=%.2f m³/s", 
-                       lake->GetLakeName().c_str(), 
-                       lake->GetStorage(), 
-                       lake->GetStorage() / 1e9,
-                       lake->GetOutflow());
+            // Volume and outflow processing without logging
           }
         }
       }
@@ -1693,6 +1685,10 @@ void Simulator::SimulateDistributed(bool trackPeaks) {
       }
       if (sModel) {
         sModel->SaveStates(&currentTime, statePath, &gridWriter);
+      }
+      // Save elevation correction state if enabled
+      if (sModel && tempSec && tempSec->GetElevCorr()) {
+        tempReader.SaveElevCorrState(&currentTime, statePath, &gridWriter, &nodes);
       }
       
       // Save states for additional lake models
@@ -2029,11 +2025,7 @@ void Simulator::SimulateDistributed(bool trackPeaks) {
         for (size_t i = 0; i < nodes.size(); i++) {
           if (nodes[i].x == lakeLoc->x && nodes[i].y == lakeLoc->y) {
             currentLakeVolume[i] = (float)mainLakeModel->GetStorage();
-            // Log lake volume for diagnostic purposes
-            INFO_LOGF("Lake %s (main model): Volume = %.2f m³ at grid (%ld, %ld)", 
-                     mainLakeModel->GetLakeName().c_str(), 
-                     mainLakeModel->GetStorage(), 
-                     lakeLoc->x, lakeLoc->y);
+            // Lake volume processing without logging
             break;
           }
         }
@@ -2065,11 +2057,7 @@ void Simulator::SimulateDistributed(bool trackPeaks) {
           for (size_t i = 0; i < nodes.size(); i++) {
             if (nodes[i].x == lakeLoc->x && nodes[i].y == lakeLoc->y) {
               currentLakeVolume[i] = (float)lake->GetStorage();
-              // Log lake volume for diagnostic purposes
-              INFO_LOGF("Lake %s (additional): Volume = %.2f m³ at grid (%ld, %ld)", 
-                       lake->GetLakeName().c_str(), 
-                       lake->GetStorage(), 
-                       lakeLoc->x, lakeLoc->y);
+              // Lake volume processing without logging
               break;
             }
           }

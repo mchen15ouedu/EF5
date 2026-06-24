@@ -146,8 +146,12 @@ static bool ReadLakesFromCSV(const std::string& filename, std::vector<LakeInfo>&
     }
     
     if (thVolCol >= 0 && thVolCol < (int)values.size()) {
+      // Get th_volume in km³ for b calculation
+      double th_volume_km3 = atof(values[thVolCol].c_str());
       // Convert km³ to m³ (multiply by 1e9)
-      lake.th_volume = atof(values[thVolCol].c_str()) * 1e9;
+      lake.th_volume = th_volume_km3 * 1e9;
+      // Calculate parameter b based on th_volume (input value in km³)
+      lake.param_b = LakeInfo::CalculateParamB(th_volume_km3);
     }
     
     if (areaCol >= 0 && areaCol < (int)values.size()) {
@@ -158,7 +162,11 @@ static bool ReadLakesFromCSV(const std::string& filename, std::vector<LakeInfo>&
     if (klakeCol >= 0 && klakeCol < (int)values.size()) {
       lake.retention_constant = atof(values[klakeCol].c_str());
     }
-    
+    // klake IS the retention time 'a' in the linear-reservoir outflow
+    // O = (1/(a*3600)) * S * (S/Vth)^b. Without this the model's param_a stayed
+    // 0 and the dry-season outflow was always zero (klake had no effect).
+    lake.param_a = lake.retention_constant;
+
     if (obsFamCol >= 0 && obsFamCol < (int)values.size()) {
       std::string obsFamStr = values[obsFamCol];
       if (!obsFamStr.empty() && obsFamStr.find_first_not_of(" \t\r\n") != std::string::npos) {
@@ -305,12 +313,16 @@ CONFIG_SEC_RET BasinConfigSection::ProcessKeyValue(char *name, char *value) {
     lakeInfo.th_volume = static_cast<double>(lakeSec->GetThVolume());
     lakeInfo.area = static_cast<double>(lakeSec->GetArea());
     lakeInfo.retention_constant = static_cast<double>(lakeSec->GetRetentionConstant());
+    lakeInfo.param_a = lakeInfo.retention_constant; // see ReadLakesFromCSV note
     lakeInfo.obsFlowAccum = static_cast<double>(lakeSec->GetObsFlowAccum());
     lakeInfo.obsFlowAccumSet = lakeSec->HasObsFlowAccum();
     lakeInfo.outputts = lakeSec->GetOutputTS();
+    // Calculate parameter b based on th_volume (convert from m³ to km³ for threshold check)
+    double th_volume_km3 = lakeInfo.th_volume / 1e9;
+    lakeInfo.param_b = LakeInfo::CalculateParamB(th_volume_km3);
     
     lakes.push_back(lakeInfo);
-    INFO_LOGF("Added lake %s from LakeConfigSection to basin", lakeInfo.name.c_str());
+    // Added lake from LakeConfigSection without logging
   } else {
     ERROR_LOGF("Unknown key value \"%s=%s\" in basin %s!", name, value,
                this->name);

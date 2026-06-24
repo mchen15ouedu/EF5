@@ -13,6 +13,37 @@
 #include "DatedName.h"
 #include "BasicGrids.h"
 
+// Helper functions for lake calculations
+namespace LakeCalculations {
+    double CalculateLinearReservoirOutflow(double storage, double th_volume, double param_a, double param_b) {
+        if (storage <= 0.0 || param_a <= 0.0) {
+            return 0.0;
+        }
+        double storageRatio = storage / th_volume;
+        double a_seconds = param_a * 3600.0; // Convert retention time from hours to seconds
+        return (1.0 / a_seconds) * storage * pow(storageRatio, param_b);
+    }
+    
+    double GetEngineeredDischarge(const std::string& timestamp, bool wm_flag, 
+                                   std::map<std::string, double>* engineeredDischarge) {
+        if (wm_flag && engineeredDischarge) {
+            std::map<std::string, double>::iterator it = engineeredDischarge->find(timestamp);
+            if (it != engineeredDischarge->end()) {
+                return it->second;
+            }
+        }
+        return 0.0;
+    }
+    
+    std::string TimeVarToTimestamp(TimeVar* currentTime) {
+        DatedName timeStr;
+        timeStr.SetNameStr("YYYYMMDD_HHUU");
+        timeStr.ProcessNameLoose(NULL);
+        timeStr.UpdateName(currentTime->GetTM());
+        return timeStr.GetName();
+    }
+}
+
 // Legacy LakeModel implementation (for backward compatibility)
 LegacyLakeModel::LegacyLakeModel(const LakeInfo& info, bool wm_flag, std::map<std::string, double>* engineeredDischarge)
     : lakeName(info.name), storage(info.th_volume), area(info.area), outflow(0.0), inflow(0.0), precipitation(0.0), evaporation(0.0), dt(0.0), th_volume(info.th_volume), wm_flag(wm_flag), engineeredDischarge(engineeredDischarge), retentionConstant(info.retention_constant) {}
@@ -26,39 +57,27 @@ void LegacyLakeModel::Step(const std::string& timestamp, double inflow, double p
     double precip_vol = precipitation * 1e-3 * area; // mm to m^3
     double evap_vol = evaporation * 1e-3 * area;
     storage += (inflow * dt) + precip_vol - evap_vol;
-    if (wm_flag && engineeredDischarge) {
-        std::map<std::string, double>::iterator it = engineeredDischarge->find(timestamp);
-        if (it != engineeredDischarge->end()) {
-            outflow = it->second;
-        } else {
-            outflow = 0.0;
-        }
-    } else {
+    
+    // Calculate outflow
+    outflow = LakeCalculations::GetEngineeredDischarge(timestamp, wm_flag, engineeredDischarge);
+    if (outflow == 0.0) {
         if (storage > th_volume) {
-            // Overflow condition: storage-based overflow
+            // Overflow: spill the excess; storage capped at threshold. No second
+            // subtraction (the old code removed the excess twice).
             outflow = (storage - th_volume) / dt;
             storage = th_volume;
         } else {
-            // Dry season condition: linear reservoir outflow
-            if (storage <= 0.0 || retentionConstant <= 0.0) {
-                outflow = 0.0;
-            } else {
-                // Linear reservoir equation: O = S/K (convert K from hours to seconds)
-                double linearOutflow = storage / (retentionConstant * 3600.0);
-                
-                // Apply exponential decay if we have a previous outflow value and we're in dry season
-                if (this->outflow > 0.0 && storage <= th_volume) {
-                    // Exponential decay: O_new = O_prev * exp(-dt/K)
-                    double decayedOutflow = this->outflow * exp(-dt / (retentionConstant * 3600.0));
-                    linearOutflow = decayedOutflow;
-                }
-                
-                outflow = linearOutflow;
-            }
+            // Dry season: linear-reservoir outflow, then remove it from storage.
+            // Use retentionConstant as param_a and default b=1.5 for LegacyLakeModel
+            outflow = LakeCalculations::CalculateLinearReservoirOutflow(storage, th_volume, retentionConstant, 1.5);
+            storage -= outflow * dt;
+            if (storage < 0) storage = 0;
         }
+    } else {
+        // Engineered (dam-controlled) release.
+        storage -= outflow * dt;
+        if (storage < 0) storage = 0;
     }
-    storage -= outflow * dt;
-    if (storage < 0) storage = 0;
     this->outflow = outflow;
 }
 
@@ -69,7 +88,7 @@ std::string LegacyLakeModel::GetLakeName() const { return lakeName; }
 
 // LakeModelImpl implementation (new state-saving version)
 LakeModelImpl::LakeModelImpl(const LakeInfo& info, bool wm_flag, std::map<std::string, double>* engineeredDischarge)
-    : lakeName(info.name), storage(info.th_volume), area(info.area), outflow(0.0), inflow(0.0), precipitation(0.0), evaporation(0.0), dt(0.0), th_volume(info.th_volume), wm_flag(wm_flag), engineeredDischarge(engineeredDischarge), retentionConstant(info.retention_constant), nodes(NULL), lakeNodeIndex(-1), lat(info.lat), lon(info.lon), obsFlowAccum(info.obsFlowAccum), obsFlowAccumSet(info.obsFlowAccumSet) {
+    : lakeName(info.name), storage(info.th_volume), area(info.area), outflow(0.0), inflow(0.0), precipitation(0.0), evaporation(0.0), dt(0.0), th_volume(info.th_volume), wm_flag(wm_flag), engineeredDischarge(engineeredDischarge), retentionConstant(info.retention_constant), param_a(info.param_a), param_b(info.param_b), nodes(NULL), lakeNodeIndex(-1), warnedDtResidence(false), lat(info.lat), lon(info.lon), obsFlowAccum(info.obsFlowAccum), obsFlowAccumSet(info.obsFlowAccumSet) {
     // Initialize grid location
     gridLoc.x = -1;
     gridLoc.y = -1;
@@ -88,14 +107,11 @@ bool LakeModelImpl::InitializeModel(std::vector<GridNode> *newNodes,
         return false;
     }
     
-    // Initialize lake nodes
-    lakeNodes.resize(nodes->size());
-    
     // Find the grid node where this lake is located
     lakeNodeIndex = -1;
     
     // Use the grid location that was set by LakeMap::FindLakeLocations()
-    INFO_LOGF("Lake %s: Initializing with grid location (%ld, %ld)", lakeName.c_str(), gridLoc.x, gridLoc.y);
+    // Lake initialization without logging
     
     if (gridLoc.x >= 0 && gridLoc.y >= 0) {
         // Find the node that matches the grid coordinates
@@ -103,7 +119,7 @@ bool LakeModelImpl::InitializeModel(std::vector<GridNode> *newNodes,
             GridNode& node = nodes->at(i);
             if (node.x == gridLoc.x && node.y == gridLoc.y) {
                 lakeNodeIndex = i;
-                INFO_LOGF("Lake %s: Found matching node at index %lu", lakeName.c_str(), (unsigned long)i);
+                // Found matching node without logging
                 break;
             }
         }
@@ -114,7 +130,7 @@ bool LakeModelImpl::InitializeModel(std::vector<GridNode> *newNodes,
     // Fallback: if no location found, use first node (for backward compatibility)
     if (lakeNodeIndex == -1) {
         lakeNodeIndex = 0;
-        INFO_LOGF("Lake %s: Using fallback node 0 (no grid location found)", lakeName.c_str());
+        // Using fallback node without logging
     }
     
     if (lakeNodeIndex == -1) {
@@ -122,8 +138,7 @@ bool LakeModelImpl::InitializeModel(std::vector<GridNode> *newNodes,
         return false;
     }
     
-    // Initialize the lake node
-    LakeGridNode& lakeNode = lakeNodes[lakeNodeIndex];
+    // Initialize the lake node (single struct -- see header note)
     lakeNode.lakeName = lakeName;
     lakeNode.storage = storage;
     lakeNode.area = area;
@@ -134,13 +149,13 @@ bool LakeModelImpl::InitializeModel(std::vector<GridNode> *newNodes,
     lakeNode.th_volume = th_volume;
     lakeNode.wm_flag = wm_flag;
     
-    INFO_LOGF("Lake %s: Initialized with storage=%.6f m³ (%.6f km³), area=%.6f m² (%.6f km²), th_volume=%.6f m³ (%.6f km³)", 
-              lakeName.c_str(), storage, storage/1e9, area, area/1e6, th_volume, th_volume/1e9);
+    // Lake initialized without logging
     
     // Use the retention constant from LakeInfo (no need to carve to grid)
     lakeNode.retentionConstant = retentionConstant;
-    INFO_LOGF("Lake %s: Using retention constant (klake) = %.6f from LakeInfo", 
-              lakeName.c_str(), retentionConstant);
+    lakeNode.param_a = param_a;
+    lakeNode.param_b = param_b;
+    // Using retention constant without logging
     
     // Initialize state arrays
     lakeNode.states[STATE_LAKE_STORAGE] = static_cast<float>(storage);
@@ -171,13 +186,11 @@ void LakeModelImpl::InitializeStates(TimeVar *beginTime, char *statePath) {
         
         FloatGrid *sGrid = ReadFloatTifGrid(buffer);
         if (sGrid) {
-            INFO_LOGF("Lake %s: Loading %s state from %s", 
-                     lakeName.c_str(),
-                     (p == STATE_LAKE_STORAGE) ? "storage" : "outflow", buffer);
+            // Loading state without logging
             
             if (lakeNodeIndex >= 0 && lakeNodeIndex < (int)nodes->size()) {
                 GridNode *node = &nodes->at(lakeNodeIndex);
-                LakeGridNode *cNode = &lakeNodes[lakeNodeIndex];
+                LakeGridNode *cNode = &lakeNode;
                 
                 if (sGrid->IsSpatialMatch(g_DEM)) {
                     if (sGrid->data[node->y][node->x] != sGrid->noData) {
@@ -188,31 +201,31 @@ void LakeModelImpl::InitializeStates(TimeVar *beginTime, char *statePath) {
                             storage = static_cast<double>(cNode->states[p]);
                             cNode->storage = storage;
                             foundStorageState = true;
-                            INFO_LOGF("Lake %s: Loaded storage state = %.6f m3", 
-                                     lakeName.c_str(), storage);
+                            // Loaded storage state without logging
                         } else if (p == STATE_LAKE_OUTFLOW) {
                             outflow = static_cast<double>(cNode->states[p]);
                             cNode->outflow = outflow;
                             foundOutflowState = true;
-                            INFO_LOGF("Lake %s: Loaded outflow state = %.6f m3/s", 
-                                     lakeName.c_str(), outflow);
+                            // Loaded outflow state without logging
                         }
                     }
                 }
             }
             delete sGrid;
         } else {
-            INFO_LOGF("Lake %s: %s state file not found: %s", 
-                     lakeName.c_str(),
-                     (p == STATE_LAKE_STORAGE) ? "Storage" : "Outflow", buffer);
+            // State file not found without logging
         }
     }
     
     // If state files were not found, set default values
     if (!foundStorageState && lakeNodeIndex >= 0 && lakeNodeIndex < (int)nodes->size()) {
-        // Set storage to 80% of th_volume (more realistic initial condition)
-        storage = th_volume * 0.8;
-        LakeGridNode *cNode = &lakeNodes[lakeNodeIndex];
+        // Cold-start initial storage = threshold volume (the lake sits at its
+        // outlet/spillway level). This matches the constructor's storage(th_volume)
+        // so the model has ONE consistent initial condition regardless of whether
+        // a state file exists. (Was 0.8*th_volume here, conflicting with the
+        // constructor.) Change this fraction if you prefer a spin-up buffer.
+        storage = th_volume;
+        LakeGridNode *cNode = &lakeNode;
         cNode->storage = storage;
         cNode->states[STATE_LAKE_STORAGE] = static_cast<float>(storage);
     }
@@ -220,10 +233,10 @@ void LakeModelImpl::InitializeStates(TimeVar *beginTime, char *statePath) {
     if (!foundOutflowState && lakeNodeIndex >= 0 && lakeNodeIndex < (int)nodes->size()) {
         // Set outflow to 0.0 (no initial outflow)
         outflow = 0.0;
-        LakeGridNode *cNode = &lakeNodes[lakeNodeIndex];
+        LakeGridNode *cNode = &lakeNode;
         cNode->outflow = outflow;
         cNode->states[STATE_LAKE_OUTFLOW] = static_cast<float>(outflow);
-        INFO_LOGF("Lake %s: Using default outflow = 0.0 m3/s", lakeName.c_str());
+        // Using default outflow without logging
     }
 }
 
@@ -252,8 +265,8 @@ void LakeModelImpl::SaveStates(TimeVar *currentTime, char *statePath,
         
         // Update the lake node's state
         if (lakeNodeIndex >= 0 && lakeNodeIndex < (int)nodes->size()) {
-            LakeGridNode *cNode = &lakeNodes[lakeNodeIndex];
-            
+            LakeGridNode *cNode = &lakeNode;
+
             // Update state from current lake values
             if (p == STATE_LAKE_STORAGE) {
                 cNode->states[p] = static_cast<float>(storage);
@@ -266,12 +279,7 @@ void LakeModelImpl::SaveStates(TimeVar *currentTime, char *statePath,
         
         gridWriter->WriteGrid(nodes, &dataVals, buffer, false);
         
-        // Log state saving
-        INFO_LOGF("Lake %s: Saved %s state = %.6f to %s", 
-                 lakeName.c_str(),
-                 (p == STATE_LAKE_STORAGE) ? "storage" : "outflow",
-                 (p == STATE_LAKE_STORAGE) ? storage : outflow,
-                 buffer);
+        // State saving without logging
     }
 }
 
@@ -287,44 +295,31 @@ void LakeModelImpl::Step(const std::string& timestamp, double inflow, double pre
     double precip_vol = precipitation * 1e-3 * area; // mm to m^3
     double evap_vol = evaporation * 1e-3 * area;
     storage += (inflow * dt) + precip_vol - evap_vol;
-    if (wm_flag && engineeredDischarge) {
-        std::map<std::string, double>::iterator it = engineeredDischarge->find(timestamp);
-        if (it != engineeredDischarge->end()) {
-            outflow = it->second;
-        } else {
-            outflow = 0.0;
-        }
-    } else {
+    
+    // Calculate outflow
+    outflow = LakeCalculations::GetEngineeredDischarge(timestamp, wm_flag, engineeredDischarge);
+    if (outflow == 0.0) {
         if (storage > th_volume) {
-            // Overflow condition: storage-based overflow
+            // Overflow: spill the excess. Storage is capped at the threshold and
+            // the excess leaves as outflow -- do NOT subtract outflow*dt again
+            // afterwards (that was the old double-removal mass-balance bug).
             outflow = (storage - th_volume) / dt;
             storage = th_volume;
         } else {
-            // Dry season condition: linear reservoir outflow
-            if (storage <= 0.0 || retentionConstant <= 0.0) {
-                outflow = 0.0;
-            } else {
-                // Linear reservoir equation: O = S/K (convert K from hours to seconds)
-                double linearOutflow = storage / (retentionConstant * 3600.0);
-                
-                // Apply exponential decay if we have a previous outflow value and we're in dry season
-                if (this->outflow > 0.0 && storage <= th_volume) {
-                    // Exponential decay: O_new = O_prev * exp(-dt/K)
-                    double decayedOutflow = this->outflow * exp(-dt / (retentionConstant * 3600.0));
-                    linearOutflow = decayedOutflow;
-                }
-                
-                outflow = linearOutflow;
-            }
+            // Dry season: linear-reservoir outflow, then remove it from storage.
+            outflow = LakeCalculations::CalculateLinearReservoirOutflow(storage, th_volume, param_a, param_b);
+            storage -= outflow * dt;
+            if (storage < 0) storage = 0;
         }
+    } else {
+        // Engineered (dam-controlled) release.
+        storage -= outflow * dt;
+        if (storage < 0) storage = 0;
     }
-    storage -= outflow * dt;
-    if (storage < 0) storage = 0;
     this->outflow = outflow;
-    
+
     // Update lake node state if available
-    if (lakeNodeIndex >= 0 && lakeNodeIndex < (int)lakeNodes.size()) {
-        LakeGridNode& lakeNode = lakeNodes[lakeNodeIndex];
+    if (lakeNodeIndex >= 0) {
         lakeNode.storage = storage;
         lakeNode.outflow = this->outflow;
         lakeNode.inflow = this->inflow;
@@ -342,8 +337,7 @@ void LakeModelImpl::ApplyVerticalBalance(float stepHours, std::vector<float>* pr
     // This handles the vertical water exchange with the atmosphere
     
     if (!precip || !pet || lakeNodeIndex < 0 || lakeNodeIndex >= (int)precip->size()) {
-        INFO_LOGF("Lake %s: Vertical balance skipped - invalid parameters (lakeNodeIndex=%d, precipSize=%lu)", 
-                  lakeName.c_str(), lakeNodeIndex, precip ? precip->size() : 0);
+        // Vertical balance skipped without logging
         return;
     }
     
@@ -367,8 +361,7 @@ void LakeModelImpl::ApplyVerticalBalance(float stepHours, std::vector<float>* pr
 
     
     // Update lake node state
-    if (lakeNodeIndex >= 0 && lakeNodeIndex < (int)lakeNodes.size()) {
-        LakeGridNode& lakeNode = lakeNodes[lakeNodeIndex];
+    if (lakeNodeIndex >= 0) {
         lakeNode.storage = storage;
         lakeNode.precipitation = this->precipitation;
         lakeNode.evaporation = this->evaporation;
@@ -381,8 +374,7 @@ void LakeModelImpl::ApplyHorizontalBalance(float stepHours, std::vector<float>* 
     // This handles the horizontal water exchange with the river network
     
     if (!currentQ || !nodes || !currentTime || !lakeMap || lakeNodeIndex < 0) {
-        INFO_LOGF("Lake %s: Horizontal balance skipped - lakeNodeIndex=%d, currentQ=%p, nodes=%p, currentTime=%p, lakeMap=%p", 
-                  lakeName.c_str(), lakeNodeIndex, currentQ, nodes, currentTime, lakeMap);
+        // Horizontal balance skipped without logging
         return;
     }
     
@@ -391,67 +383,47 @@ void LakeModelImpl::ApplyHorizontalBalance(float stepHours, std::vector<float>* 
     
     this->inflow = static_cast<double>(inflow);
     this->dt = static_cast<double>(stepHours * 3600.0); // Convert hours to seconds
-    
+
+    // Warn (once) if the timestep is larger than the lake's residence time.
+    // We deliberately do NOT cap the outflow -- capping would break the water
+    // mass balance. Instead we tell the user their setup may be unstable.
+    if (!warnedDtResidence && param_a > 0.0 && (double)stepHours > param_a) {
+        WARNING_LOGF("Lake %s: timestep (%.4g h) exceeds the lake residence time "
+                     "klake=%.4g h. Outflow may overshoot available storage and "
+                     "degrade the simulation; consider a smaller timestep.",
+                     lakeName.c_str(), (double)stepHours, param_a);
+        warnedDtResidence = true;
+    }
+
     // Add inflow to storage
     storage += this->inflow * this->dt;
-    
 
-        
     // Calculate outflow based on storage conditions
-    double outflowValue = 0.0;
-    
-    if (wm_flag && engineeredDischarge) {
-        // Use engineered discharge if available
-        // Convert currentTime to timestamp string format "YYYYMMDD_HHUU" (consistent with state saving)
-        DatedName timeStr;
-        timeStr.SetNameStr("YYYYMMDD_HHUU");
-        timeStr.ProcessNameLoose(NULL);
-        timeStr.UpdateName(currentTime->GetTM());
-        std::string timestamp = timeStr.GetName();
-        
-        // Look up engineered discharge for this timestamp
-        std::map<std::string, double>::iterator it = engineeredDischarge->find(timestamp);
-        if (it != engineeredDischarge->end()) {
-            outflowValue = it->second;
-        } else {
-            // If no engineered discharge found for this timestamp, use 0.0
-            outflowValue = 0.0;
-        }
-    } else {
+    std::string timestamp = LakeCalculations::TimeVarToTimestamp(currentTime);
+    double outflowValue = LakeCalculations::GetEngineeredDischarge(timestamp, wm_flag, engineeredDischarge);
+
+    if (outflowValue == 0.0) {
         if (storage > th_volume) {
-            // Overflow condition: storage-based overflow
+            // Overflow: spill the excess. Storage capped at the threshold; the
+            // excess leaves as outflow. Do NOT subtract outflow*dt again below
+            // (that was the old double-removal mass-balance bug).
             outflowValue = (storage - th_volume) / this->dt;
             storage = th_volume;
         } else {
-            // Dry season condition: linear reservoir outflow
-            if (storage <= 0.0 || retentionConstant <= 0.0) {
-                outflowValue = 0.0;
-            } else {
-                // Linear reservoir equation: O = S/K (convert K from hours to seconds)
-                double linearOutflow = storage / (retentionConstant * 3600.0);
-                
-                // Apply exponential decay if we have a previous outflow value and we're in dry season
-                if (this->outflow > 0.0 && storage <= th_volume) {
-                    // Exponential decay: O_new = O_prev * exp(-dt/K)
-                    double decayedOutflow = this->outflow * exp(-this->dt / (retentionConstant * 3600.0));
-                    linearOutflow = decayedOutflow;
-                }
-                
-                outflowValue = linearOutflow;
-            }
+            // Dry season: linear-reservoir outflow, then remove it from storage.
+            outflowValue = LakeCalculations::CalculateLinearReservoirOutflow(storage, th_volume, param_a, param_b);
+            storage -= outflowValue * this->dt;
+            if (storage < 0) storage = 0;
         }
+    } else {
+        // Engineered (dam-controlled) release.
+        storage -= outflowValue * this->dt;
+        if (storage < 0) storage = 0;
     }
-    
-    // Remove outflow from storage
-    storage -= outflowValue * this->dt;
-    if (storage < 0) storage = 0;
     this->outflow = outflowValue;
-    
 
-    
     // Update lake node state
-    if (lakeNodeIndex >= 0 && lakeNodeIndex < (int)lakeNodes.size()) {
-        LakeGridNode& lakeNode = lakeNodes[lakeNodeIndex];
+    if (lakeNodeIndex >= 0) {
         lakeNode.storage = storage;
         lakeNode.outflow = this->outflow;
         lakeNode.inflow = this->inflow;
@@ -575,12 +547,19 @@ void ReadLakeInfoCSV(const std::string& filename, std::map<std::string, LakeInfo
             info.name = nameStr;
             info.lat = atof(latStr.c_str());
             info.lon = atof(lonStr.c_str());
+            // Get th_volume in km³ for b calculation
+            double th_volume_km3 = atof(thVolStr.c_str());
             // Convert km³ to m³ (multiply by 1e9)
-            info.th_volume = atof(thVolStr.c_str()) * 1e9;
+            info.th_volume = th_volume_km3 * 1e9;
             // Convert km² to m² (multiply by 1e6)
             info.area = atof(areaStr.c_str()) * 1e6;
             // Set retention constant (default to 24 hours if not provided)
             info.retention_constant = klakeStr.empty() ? 24.0 : atof(klakeStr.c_str());
+            // klake IS the linear-reservoir retention time 'a'; without this
+            // param_a stayed 0 and dry-season outflow was always zero.
+            info.param_a = info.retention_constant;
+            // Calculate parameter b based on th_volume (input value in km³)
+            info.param_b = LakeInfo::CalculateParamB(th_volume_km3);
             // Set observed flow accumulation (optional)
             if (!obsFamStr.empty()) {
                 info.obsFlowAccum = atof(obsFamStr.c_str());

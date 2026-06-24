@@ -17,8 +17,18 @@ LakeCaliParamConfigSection::LakeCaliParamConfigSection(const char *nameVal)
   // These should match the definitions in Models.tbl
   // Note: Lake parameters don't need initial values as they come from lakes.csv
   for (int i = 0; i < numLakeParam; i++) {
-    paramMins[i] = 0.0f;   // Default minimum
-    paramMaxs[i] = 10.0f;  // Default maximum
+    if (i == 0) {
+      // klake parameter (retention time in hours)
+      paramMins[i] = 0.0f;   // Default minimum
+      paramMaxs[i] = 10.0f;  // Default maximum
+    } else if (i == 1) {
+      // b parameter
+      paramMins[i] = 0.5f;   // Default minimum
+      paramMaxs[i] = 3.0f;   // Default maximum
+    } else {
+      paramMins[i] = 0.0f;   // Default minimum
+      paramMaxs[i] = 10.0f;  // Default maximum
+    }
   }
 }
 
@@ -46,6 +56,23 @@ CONFIG_SEC_RET LakeCaliParamConfigSection::ProcessKeyValue(char *name, char *val
       return VALID_RESULT;
     } else {
       ERROR_LOG("klake parameter must be in format: klake=<min>,<max>");
+      return INVALID_RESULT;
+    }
+  }
+  
+  // Handle b parameter calibration
+  if (!strcasecmp(name, "b")) {
+    // Parse b=<min>,<max> format
+    char* comma = strchr(value, ',');
+    if (comma != NULL) {
+      *comma = '\0'; // Split the string
+      float *paramMins = GetParamMins();
+      float *paramMaxs = GetParamMaxs();
+      paramMins[1] = (float)atof(value);
+      paramMaxs[1] = (float)atof(comma + 1);
+      return VALID_RESULT;
+    } else {
+      ERROR_LOG("b parameter must be in format: b=<min>,<max>");
       return INVALID_RESULT;
     }
   }

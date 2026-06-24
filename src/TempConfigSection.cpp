@@ -13,6 +13,7 @@ TempConfigSection::TempConfigSection() {
   typeSet = false;
   unitSet = false;
   demSet = false;
+  elevCorr = false;
 }
 
 TempConfigSection::~TempConfigSection() {}
@@ -51,6 +52,13 @@ CONFIG_SEC_RET TempConfigSection::ProcessKeyValue(char *name, char *value) {
   } else if (!strcasecmp(name, "dem")) {
     strcpy(dem, value);
     demSet = true;
+  } else if (!strcasecmp(name, "elevcorr")) {
+    // elevCorr=true/false (default false)
+    if (!strcasecmp(value, "true") || !strcasecmp(value, "y") || !strcmp(value, "1")) {
+      elevCorr = true;
+    } else {
+      elevCorr = false;
+    }
   } else if (!strcasecmp(name, "name")) {
     fileName.SetNameStr(value);
     nameSet = true;

@@ -114,19 +114,15 @@ public:
     
     // Calculate linear reservoir outflow for dry season (when storage <= th_volume)
     float CalculateLinearReservoirOutflow(float dt) {
-        if (storage <= 0.0f || retentionConstant <= 0.0f) {
-            return 0.0f; // Return 0 if no storage or invalid K
+        if (storage <= 0.0f || param_a <= 0.0f) {
+            return 0.0f; // Return 0 if no storage or invalid retention time
         }
         
-        // Linear reservoir equation: O = S/K
-        float linearOutflow = storage / retentionConstant;
-        
-        // Apply exponential decay if we have a previous outflow value and we're in dry season
-        if (outflow > 0.0f && storage <= thVolume) {
-            // Exponential decay: O_new = O_prev * exp(-dt/K)
-            float decayedOutflow = outflow * exp(-dt / retentionConstant);
-            linearOutflow = decayedOutflow;
-        }
+        // Linear reservoir equation: O = (1/(a*3600)) * S * (S/th_volume)^b
+        // where a is retention time in hours, converted to seconds
+        float storageRatio = storage / thVolume;
+        float a_seconds = param_a * 3600.0f; // Convert retention time from hours to seconds
+        float linearOutflow = (1.0f / a_seconds) * storage * powf(storageRatio, param_b);
         
         return linearOutflow;
     }
@@ -163,6 +159,8 @@ private:
     float precipitation;
     float evaporation;
     float retentionConstant;
+    float param_a; // Retention time in hours for linear reservoir equation: O = (1/(a*3600)) * S * (S/th_volume)^b
+    float param_b; // Parameter b for linear reservoir equation: O = (1/(a*3600)) * S * (S/th_volume)^b
     float obsFlowAccum;
     bool obsFlowAccumSet;
     bool outputts;

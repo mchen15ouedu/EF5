@@ -4,6 +4,7 @@
 const char *tempTypeStrings[] = {
     "asc",
     "tif",
+    "bif",
 };
 
 SUPPORTED_TEMP_TYPES TempType::GetType() { return type; }

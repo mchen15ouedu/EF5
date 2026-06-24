@@ -241,9 +241,7 @@ void LakeMap::FindLakeLocations() {
       loc->y = maxLoc.y;
     }
     
-    INFO_LOGF("Lake %s (%f, %f; %ld, %ld): FAM %f", lake->GetName(),
-              lake->GetLat(), lake->GetLon(), loc->y, loc->x,
-              (float)g_FAM->data[loc->y][loc->x]);
+    // Lake FAM processing without logging
   }
 }
 
@@ -311,7 +309,7 @@ void LakeMap::FindUpstreamNeighbors() {
       }
     }
     
-    INFO_LOGF("Lake %s has %lu upstream neighbors", lake->GetName(), (unsigned long)neighbors.size());
+    // Upstream neighbors processing without logging
   }
 }
 
@@ -345,56 +343,51 @@ float LakeMap::CalculateInflow(LakeModelImpl *lake, std::vector<float> *currentQ
         }
       }
       
-      INFO_LOGF("Lake %s: Using inlet-based inflow = %.6f m³/s", lake->GetLakeName().c_str(), totalInflow);
+      // Using inlet-based inflow without logging
       return totalInflow; // Return sum of all inlets (not average)
     }
   }
   
+  // Build the (y,x) -> node-index lookup once (avoids an O(nodes) scan for
+  // every neighbour of every lake on every timestep).
+  if (nodeIndexByLoc.empty() && nodes && !nodes->empty()) {
+    for (size_t ni = 0; ni < nodes->size(); ++ni) {
+      long long key = (((long long)(*nodes)[ni].y) << 32) |
+                      (unsigned long)(*nodes)[ni].x;
+      nodeIndexByLoc[key] = (int)ni;
+    }
+  }
+
   // Fallback to FAM neighbor-based inflow calculation
   std::vector<GridLoc> neighbors = GetUpstreamNeighbors(lake);
-  
+
   if (neighbors.empty()) {
-    // Fallback: use lake cell itself if no upstream neighbors found
+    // Fallback: use lake cell itself if no upstream neighbors found. The routed
+    // Q at the lake cell already accumulates all upstream contributions.
     GridLoc *loc = lake->GetLocation();
-    int nodeIdx = -1;
-    for (size_t ni = 0; ni < nodes->size(); ++ni) {
-      if ((*nodes)[ni].x == loc->x && (*nodes)[ni].y == loc->y) {
-        nodeIdx = (int)ni;
-        break;
-      }
-    }
+    long long key = (((long long)loc->y) << 32) | (unsigned long)loc->x;
+    std::map<long long, int>::iterator it = nodeIndexByLoc.find(key);
+    int nodeIdx = (it != nodeIndexByLoc.end()) ? it->second : -1;
     if (nodeIdx >= 0 && nodeIdx < (int)currentQ->size()) {
-      float lakeCellQ = (*currentQ)[nodeIdx];
-      return lakeCellQ;
+      return (*currentQ)[nodeIdx];
     }
     return 0.0f;
   }
-  
-  // Calculate average inflow from upstream neighbors
+
+  // Total inflow = SUM of the discharges of every cell that drains into the
+  // lake cell (NOT the average -- averaging under-counts when >1 cell drains
+  // in, violating mass conservation).
   float inflow = 0.0f;
-  int neighborCount = 0;
-  
   for (size_t n = 0; n < neighbors.size(); ++n) {
-    int nx = neighbors[n].x;
-    int ny = neighbors[n].y;
-    
-    // Find node index for this neighbor
-    int nodeIdx = -1;
-    for (size_t ni = 0; ni < nodes->size(); ++ni) {
-      if ((*nodes)[ni].x == nx && (*nodes)[ni].y == ny) {
-        nodeIdx = (int)ni;
-        break;
-      }
-    }
+    long long key = (((long long)neighbors[n].y) << 32) |
+                    (unsigned long)neighbors[n].x;
+    std::map<long long, int>::iterator it = nodeIndexByLoc.find(key);
+    int nodeIdx = (it != nodeIndexByLoc.end()) ? it->second : -1;
     if (nodeIdx >= 0 && nodeIdx < (int)currentQ->size()) {
-      float neighborQ = (*currentQ)[nodeIdx];
-      inflow += neighborQ;
-      neighborCount++;
+      inflow += (*currentQ)[nodeIdx];
     }
   }
-  
-  float avgInflow = (neighborCount > 0) ? (inflow / neighborCount) : 0.0f;
-  return avgInflow;
+  return inflow;
 }
 
 
@@ -417,7 +410,7 @@ void LakeMap::InitializeInlets(std::vector<InletConfigSection *> *inlets) {
     for (size_t j = 0; j < lakes.size(); j++) {
       if (strcasecmp(lakes[j]->GetLakeName().c_str(), inlet->GetLakeName()) == 0) {
         lakeInlets[j].push_back(inlet);
-        INFO_LOGF("Assigned inlet %s to lake %s", inlet->GetName(), inlet->GetLakeName());
+        // Assigned inlet without logging
         foundLake = true;
         break;
       }
@@ -430,7 +423,7 @@ void LakeMap::InitializeInlets(std::vector<InletConfigSection *> *inlets) {
   
   // Report inlet grouping results
   for (size_t i = 0; i < lakes.size(); i++) {
-    INFO_LOGF("Lake %s has %lu inlets configured", lakes[i]->GetLakeName().c_str(), (unsigned long)lakeInlets[i].size());
+    // Lake inlets configured without logging
   }
   
   // Load time series for all inlets

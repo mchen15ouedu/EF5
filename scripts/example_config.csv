@@ -1,0 +1,13 @@
+parameter,value
+dem_file,data/dem.tif
+flow_dir_file,data/flow_direction.tif
+flow_accum_file,data/flow_accumulation.tif
+outlet_lon,-98.123456
+outlet_lat,39.654321
+alpha0,1.5
+alpha,2.0
+beta,0.6
+stepHours,0.25
+channel_threshold,100.0
+runoff_timestep_hours,1.0
+
