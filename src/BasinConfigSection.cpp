@@ -146,12 +146,15 @@ static bool ReadLakesFromCSV(const std::string& filename, std::vector<LakeInfo>&
     }
     
     if (thVolCol >= 0 && thVolCol < (int)values.size()) {
-      // Get th_volume in km³ for b calculation
-      double th_volume_km3 = atof(values[thVolCol].c_str());
-      // Convert km³ to m³ (multiply by 1e9)
-      lake.th_volume = th_volume_km3 * 1e9;
-      // Calculate parameter b based on th_volume (input value in km³)
-      lake.param_b = LakeInfo::CalculateParamB(th_volume_km3);
+      // th_volume in the CSV is in MILLION m^3 (Mm^3). For these small lakes
+      // (area ~0.1-0.4 km^2) values of 0.6-1.2 give a physical ~2-4 m depth;
+      // the previous km^3 reading (x1e9) made a ~2.4 km-deep "pond", driving
+      // (S/Vth)^b -> 0 and producing unstable spikes.
+      double th_volume_Mm3 = atof(values[thVolCol].c_str());
+      // Convert Mm^3 to m^3 (multiply by 1e6)
+      lake.th_volume = th_volume_Mm3 * 1e6;
+      // CalculateParamB expects km^3; convert (1 Mm^3 = 1e-3 km^3).
+      lake.param_b = LakeInfo::CalculateParamB(th_volume_Mm3 / 1000.0);
     }
     
     if (areaCol >= 0 && areaCol < (int)values.size()) {

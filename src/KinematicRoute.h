@@ -3,6 +3,9 @@
 
 #include "ModelBase.h"
 
+class LakeModelImpl; // forward decl: lake cells are coupled in-sweep (see Route)
+class TimeVar;
+
 enum KW_LAYER {
   KW_LAYER_FASTFLOW,
   KW_LAYER_INTERFLOW,
@@ -33,6 +36,11 @@ struct KWGridNode : BasicGridNode {
   // double previousStreamflow; //cms
   // double previousOverland;
   double incomingWaterOverland, incomingWaterChannel;
+
+  // Non-NULL if this channel cell is a lake/reservoir outlet. When set, channel
+  // routing at this cell is replaced by the reservoir step so the regulated
+  // outflow propagates downstream within the same sweep.
+  LakeModelImpl *lakeModel;
 };
 
 class KWRoute : public RoutingModel {
@@ -54,6 +62,14 @@ public:
              std::vector<float> *interFlow, std::vector<float> *baseFlow, std::vector<float> *discharge);
   float GetMaxSpeed() { return maxSpeed; }
 
+  // Couple a lake/reservoir to the routing cell at the given node index. After
+  // this, the cell's channel outflow is governed by the reservoir step rather
+  // than the kinematic wave, so lake regulation reaches downstream cells.
+  void RegisterLake(long nodeIndex, LakeModelImpl *lake);
+  // Provide the current simulation time so the in-sweep reservoir step can look
+  // up engineered (dam) discharge. NULL disables engineered lookup.
+  void SetCurrentTime(TimeVar *t) { currentRouteTime = t; }
+
 private:
   void RouteInt(float stepSeconds, GridNode *node, KWGridNode *cNode,
                 float fastFlow, float interFlow, float baseFlow);
@@ -66,6 +82,8 @@ private:
   std::vector<KWGridNode> kwNodes;
   float maxSpeed;
   bool initialized;
+  bool hasLakes;            // true once at least one lake cell is registered
+  TimeVar *currentRouteTime; // current sim time for engineered-discharge lookup
 };
 
 #endif

@@ -380,33 +380,55 @@ void LakeModelImpl::ApplyHorizontalBalance(float stepHours, std::vector<float>* 
     
     // Calculate inflow from routed Q using LakeMap
     float inflow = lakeMap->CalculateInflow(this, currentQ, nodes, currentTime);
-    
-    this->inflow = static_cast<double>(inflow);
-    this->dt = static_cast<double>(stepHours * 3600.0); // Convert hours to seconds
+
+    // Step the reservoir and overwrite the lake cell's Q with the regulated
+    // outflow. NOTE: with kinematic-wave routing this legacy post-routing write
+    // does NOT propagate downstream (the router never reads currentQ back as an
+    // input), so KWRoute now calls StepReservoirInflow() in-sweep instead. This
+    // path is kept for routing models without the in-router coupling.
+    double outflowValue = StepReservoirInflow(static_cast<double>(inflow),
+                                              static_cast<double>(stepHours * 3600.0),
+                                              currentTime);
+
+    // Replace Q value at lake grid cell with lake outflow
+    if (lakeNodeIndex >= 0 && lakeNodeIndex < (int)currentQ->size()) {
+        (*currentQ)[lakeNodeIndex] = static_cast<float>(outflowValue);
+    }
+}
+
+// Core reservoir step shared by the legacy post-routing path and the in-router
+// (KWRoute) coupling. Updates storage from a channel inflow rate (m^3/s) and
+// returns the regulated outflow (m^3/s). Mass is conserved: inflow is added to
+// storage, outflow removed (overflow spills the excess above th_volume).
+double LakeModelImpl::StepReservoirInflow(double inflowCMS, double dtSeconds, TimeVar* currentTime) {
+    this->inflow = inflowCMS;
+    this->dt = dtSeconds;
 
     // Warn (once) if the timestep is larger than the lake's residence time.
     // We deliberately do NOT cap the outflow -- capping would break the water
     // mass balance. Instead we tell the user their setup may be unstable.
-    if (!warnedDtResidence && param_a > 0.0 && (double)stepHours > param_a) {
+    double stepHours = dtSeconds / 3600.0;
+    if (!warnedDtResidence && param_a > 0.0 && stepHours > param_a) {
         WARNING_LOGF("Lake %s: timestep (%.4g h) exceeds the lake residence time "
                      "klake=%.4g h. Outflow may overshoot available storage and "
                      "degrade the simulation; consider a smaller timestep.",
-                     lakeName.c_str(), (double)stepHours, param_a);
+                     lakeName.c_str(), stepHours, param_a);
         warnedDtResidence = true;
     }
 
     // Add inflow to storage
     storage += this->inflow * this->dt;
 
-    // Calculate outflow based on storage conditions
-    std::string timestamp = LakeCalculations::TimeVarToTimestamp(currentTime);
-    double outflowValue = LakeCalculations::GetEngineeredDischarge(timestamp, wm_flag, engineeredDischarge);
+    // Calculate outflow. currentTime may be NULL (engineered discharge unused).
+    double outflowValue = 0.0;
+    if (currentTime) {
+        std::string timestamp = LakeCalculations::TimeVarToTimestamp(currentTime);
+        outflowValue = LakeCalculations::GetEngineeredDischarge(timestamp, wm_flag, engineeredDischarge);
+    }
 
     if (outflowValue == 0.0) {
         if (storage > th_volume) {
-            // Overflow: spill the excess. Storage capped at the threshold; the
-            // excess leaves as outflow. Do NOT subtract outflow*dt again below
-            // (that was the old double-removal mass-balance bug).
+            // Overflow: spill the excess above the threshold (no double-removal).
             outflowValue = (storage - th_volume) / this->dt;
             storage = th_volume;
         } else {
@@ -422,7 +444,6 @@ void LakeModelImpl::ApplyHorizontalBalance(float stepHours, std::vector<float>* 
     }
     this->outflow = outflowValue;
 
-    // Update lake node state
     if (lakeNodeIndex >= 0) {
         lakeNode.storage = storage;
         lakeNode.outflow = this->outflow;
@@ -430,11 +451,7 @@ void LakeModelImpl::ApplyHorizontalBalance(float stepHours, std::vector<float>* 
         lakeNode.states[STATE_LAKE_STORAGE] = static_cast<float>(storage);
         lakeNode.states[STATE_LAKE_OUTFLOW] = static_cast<float>(this->outflow);
     }
-    
-    // Replace Q value at lake grid cell with lake outflow
-    if (lakeNodeIndex >= 0 && lakeNodeIndex < (int)currentQ->size()) {
-        (*currentQ)[lakeNodeIndex] = static_cast<float>(this->outflow);
-    }
+    return outflowValue;
 }
 
 bool LakeModelImpl::WaterBalance(float stepHours,

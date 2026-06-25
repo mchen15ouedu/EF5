@@ -364,14 +364,23 @@ def _load_gdal(path, band=1):
             raise ValueError("%s has no raster bands" % path)
         data = ds.read(band).astype(np.float32)
         t = ds.transform
-        nodata = ds.nodata if ds.nodata is not None else DEFAULT_NODATA
+        src_nodata = ds.nodata
         if t.e > 0:  # south-up file -> flip to north-up
             data = data[::-1, :]
             top = t.f + ds.height * t.e
             t = Affine(t.a, t.b, t.c, t.d, -abs(t.e), top)
-        if nodata is not None:
-            data = np.where(np.isnan(data), DEFAULT_NODATA, data)
-        return data, t, ds.crs, float(nodata)
+        # Normalize ALL missing-data sentinels to a single nodata value so EF5's
+        # `value != noData` test works. Some Arc/GDAL grids (e.g. flow-accum)
+        # *declare* one nodata (-9999) but actually fill cells with the float32
+        # minimum (-3.4e38); reading raw and masking only the declared value
+        # leaks that sentinel through as if it were real data. Treat as missing:
+        # non-finite, the declared nodata, and |value| >= 1e30.
+        mask = ~np.isfinite(data)
+        if src_nodata is not None:
+            mask |= (data == np.float32(src_nodata))
+        mask |= np.abs(data) >= 1e30
+        data = np.where(mask, np.float32(DEFAULT_NODATA), data)
+        return data, t, ds.crs, float(DEFAULT_NODATA)
 
 
 def _load_scientific(path, var=None, time=None, level=None, timestamp=None):

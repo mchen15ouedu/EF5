@@ -1,6 +1,7 @@
 #include "KinematicRoute.h"
 #include "AscGrid.h"
 #include "DatedName.h"
+#include "LakeModel.h"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -11,9 +12,17 @@ static const char *stateStrings[] = {
     "IR",
 };
 
-KWRoute::KWRoute() {}
+KWRoute::KWRoute() : hasLakes(false), currentRouteTime(NULL) {}
 
 KWRoute::~KWRoute() {}
+
+void KWRoute::RegisterLake(long nodeIndex, LakeModelImpl *lake) {
+  if (nodeIndex < 0 || nodeIndex >= (long)kwNodes.size()) {
+    return;
+  }
+  kwNodes[nodeIndex].lakeModel = lake;
+  hasLakes = true;
+}
 
 float KWRoute::SetObsInflow(long index, float inflow) {
   KWGridNode *cNode = &(kwNodes[index]);
@@ -81,6 +90,7 @@ bool KWRoute::InitializeModel(
     cNode->incomingWater[KW_LAYER_FASTFLOW] = 0.0;
     cNode->incomingWaterOverland = 0.0;
     cNode->incomingWaterChannel = 0.0;
+    cNode->lakeModel = NULL; // set later via RegisterLake() for lake cells
     for (int p = 0; p < STATE_KW_QTY; p++) {
       cNode->states[p] = 0.0;
     }
@@ -264,6 +274,19 @@ void KWRoute::RouteInt(float stepSeconds, GridNode *node, KWGridNode *cNode,
 
     float newq = estq;
 
+    // Lake/reservoir coupling on an overland (non-channel) cell. EF5 reports a
+    // non-channel cell's discharge as newq * horLen (see Route()), and routes
+    // newq downstream via incomingWaterOverland. The kinematic throughflow
+    // newq*horLen is ~the cell's inflow, so feed it through the reservoir and
+    // replace newq with (regulated outflow / horLen). The sweep is upstream ->
+    // downstream, so the regulated value reaches downstream cells this same step.
+    if (cNode->lakeModel && node->horLen > 0.0) {
+      double inflowCMS = (double)newq * (double)node->horLen;
+      double outflowCMS = cNode->lakeModel->StepReservoirInflow(
+          inflowCMS, stepSeconds, currentRouteTime);
+      newq = (float)(outflowCMS / (double)node->horLen);
+    }
+
     cNode->states[STATE_KW_PQ] = newq;
     if (node->downStreamNode != INVALID_DOWNSTREAM_NODE) {
       kwNodes[nodes->at(node->downStreamNode).modelIndex]
@@ -418,6 +441,21 @@ void KWRoute::RouteInt(float stepSeconds, GridNode *node, KWGridNode *cNode,
     cNode->incomingWaterChannel, cNode->states[STATE_KW_PQ], newq,
     cNode->incomingWaterOverland, A, B, C, D, E, alpha, 0.0);
     }*/
+
+    // Lake/reservoir coupling: if this channel cell is a lake outlet, discard
+    // the kinematic-wave result and route the cell's total inflow through the
+    // reservoir instead. Because the node sweep runs strictly upstream ->
+    // downstream, incomingWaterChannel already holds all upstream channel flow,
+    // and newq is the local lateral inflow (cms/m) over the cell. The regulated
+    // outflow then propagates downstream this same step (no operator-split lag).
+    if (cNode->lakeModel) {
+      double inflowCMS = (double)cNode->incomingWaterChannel +
+                         (double)newq * (double)node->horLen;
+      double outflowCMS = cNode->lakeModel->StepReservoirInflow(
+          inflowCMS, stepSeconds, currentRouteTime);
+      newWater = (float)outflowCMS;
+    }
+
     cNode->states[STATE_KW_PQ] =
         newWater; // Update previous Q for further routing if "steps" > 1
     if (node->downStreamNode != INVALID_DOWNSTREAM_NODE) {

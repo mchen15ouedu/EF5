@@ -1423,6 +1423,33 @@ void Simulator::SimulateDistributed(bool trackPeaks) {
       }
     }
   }
+
+  // Couple lakes into the kinematic-wave router so their regulated outflow
+  // actually propagates downstream. Without this the lake only overwrites its
+  // own cell's Q after routing (never read back by the router), so lake
+  // residence time has no effect at downstream gauges. When this coupling is
+  // active we skip the redundant post-routing ApplyHorizontalBalance below to
+  // avoid stepping each lake's storage twice.
+  bool lakesInRouter = false;
+  KWRoute* lakeRouter = NULL;
+  if (task->IsLakeModuleEnabled() && task->GetModel() != MODEL_LAKE) {
+    KWRoute* kwr = dynamic_cast<KWRoute*>(rModel);
+    if (kwr) {
+      for (size_t l = 0; l < lakeModels.size(); ++l) {
+        LakeModelImpl* lake = lakeModels[l];
+        if (lake && lake->lakeNodeIndex >= 0) {
+          kwr->RegisterLake(lake->lakeNodeIndex, lake);
+          lakesInRouter = true;
+        }
+      }
+      if (lakesInRouter) {
+        lakeRouter = kwr;
+        INFO_LOGF("Coupled %d lake(s) into kinematic-wave routing",
+                  (int)lakeModels.size());
+      }
+    }
+  }
+
   if (griddedOutputs != OG_NONE || trackPeaks || outputRP || saveStates) {
     gridWriter.Initialize();
   }
@@ -1606,6 +1633,11 @@ void Simulator::SimulateDistributed(bool trackPeaks) {
       double beginTimeR = omp_get_wtime();
 #endif
 #endif
+      // Give the router the current time so the in-sweep lake/reservoir step
+      // can resolve engineered (dam) discharge by timestamp.
+      if (lakeRouter) {
+        lakeRouter->SetCurrentTime(&currentTime);
+      }
       rModel->Route(stepHoursReal, &currentFF, &currentSF, &currentBF, &currentQ);
       // printf("After routing...\n");
 #if _OPENMP
@@ -1655,13 +1687,18 @@ void Simulator::SimulateDistributed(bool trackPeaks) {
     
     // Part 2: Horizontal balance (inflow-outflow) for lakes after routing
     if (task->IsLakeModuleEnabled()) {
-      // Handle additional lakes (when using non-lake water balance model)
-      for (size_t l = 0; l < lakeModels.size(); ++l) {
-        LakeModelImpl* lake = lakeModels[l];
-        if (!lake) continue;
-        
-        // Apply horizontal balance and update Q vector
-        lake->ApplyHorizontalBalance(timeStepHours, &currentQ, &nodes, &currentTime, &lakeMap);
+      // Handle additional lakes (when using non-lake water balance model).
+      // Skip when the lakes are coupled inside the kinematic-wave router --
+      // there the reservoir step already ran in-sweep (and propagated outflow
+      // downstream); running it again here would step storage a second time.
+      if (!lakesInRouter) {
+        for (size_t l = 0; l < lakeModels.size(); ++l) {
+          LakeModelImpl* lake = lakeModels[l];
+          if (!lake) continue;
+
+          // Apply horizontal balance and update Q vector
+          lake->ApplyHorizontalBalance(timeStepHours, &currentQ, &nodes, &currentTime, &lakeMap);
+        }
       }
       
       // Handle main lake model (when using MODEL_LAKE)

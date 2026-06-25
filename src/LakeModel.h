@@ -136,6 +136,14 @@ public:
     void ApplyVerticalBalance(float stepHours, std::vector<float>* precip, std::vector<float>* pet);
     void ApplyHorizontalBalance(float stepHours, std::vector<float>* currentQ, std::vector<GridNode>* nodes, TimeVar* currentTime, LakeMap* lakeMap);
 
+    // Core reservoir step: given a channel inflow rate (m^3/s) and timestep (s),
+    // update storage and return the regulated outflow (m^3/s). This is the single
+    // place the linear-reservoir / overflow / engineered logic lives; both the
+    // legacy post-routing ApplyHorizontalBalance path and the in-router coupling
+    // (KWRoute) call it so they stay consistent. currentTime may be NULL when
+    // engineered discharge is not used (CSV lakes have wm_flag=false).
+    double StepReservoirInflow(double inflowCMS, double dtSeconds, TimeVar* currentTime);
+
     // Members
     std::string lakeName;    // Lake name
     double storage;      // Current storage (m^3)
