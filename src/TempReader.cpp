@@ -2,6 +2,7 @@
 #include "AscGrid.h"
 #include "BifGrid.h"
 #include "Messages.h"
+#include "PqfGrid.h"
 #include "TifGrid.h"
 #include "GridWriterFull.h"
 #include <cmath>
@@ -99,6 +100,9 @@ bool TempReader::Read(char *file, SUPPORTED_TEMP_TYPES type,
     break;
   case TEMP_BIF:
     tempGrid = ReadFloatBifGrid(file);
+    break;
+  case TEMP_PQF:
+    tempGrid = ReadFloatPqfGrid(file);
     break;
   default:
     ERROR_LOG("Unsupported Temp format!");

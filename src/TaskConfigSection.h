@@ -47,6 +47,10 @@ public:
   char *GetPreloadForcings();
   char *GetDAFile();
   char *GetCOFile();
+  // Observed surface/subsurface runoff path patterns (per-timestep rasters,
+  // DatedName tokens) for STYLE_CALI_DREAM_PIXEL. Empty if unset.
+  char *GetObsSurface();
+  char *GetObsSubsurface();
   TimeVar *GetTimeBegin();
   std::vector<TimeVar*> *GetTimeBegins();  
   TimeVar *GetTimeWarmEnd();
@@ -108,6 +112,8 @@ private:
   char preloadFile[CONFIG_MAX_LEN];
   char daFile[CONFIG_MAX_LEN];
   char coFile[CONFIG_MAX_LEN];
+  char obsSurface[CONFIG_MAX_LEN];
+  char obsSubsurface[CONFIG_MAX_LEN];
   MODELS model;
   ROUTES routing;
   SNOWS snow;

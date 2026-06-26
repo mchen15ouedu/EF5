@@ -5,6 +5,7 @@ enum SUPPORTED_PET_TYPES {
   PET_ASCII,
   PET_BIF,
   PET_TIF,
+  PET_PQF,
   PET_TYPE_QTY,
 };
 

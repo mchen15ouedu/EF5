@@ -49,10 +49,15 @@ public:
   bool IsLumped() { return false; }
   const char *GetName() { return "crestphys"; }
 
-private:
+  // Public point-cell kernel: advances a single CRESTPHYSGridNode one step.
+  // Only reads/writes the passed cNode (the GridNode arg is unused), so it is
+  // safe to call concurrently on distinct cNodes — used by per-pixel
+  // calibration (STYLE_CALI_DREAM_PIXEL). fastFlow=surface, interFlow=subsurface.
   void WaterBalanceInt(GridNode *node, CRESTPHYSGridNode *cNode, float stepHours,
                        float precipIn, float petIn, float *fastFlow,
                        float *interFlow, float *baseflow);
+
+private:
   void
   InitializeParameters(std::map<GaugeConfigSection *, float *> *paramSettings,
                        std::vector<FloatGrid *> *paramGrids);

@@ -49,6 +49,8 @@ TaskConfigSection::TaskConfigSection(const char *nameVal) {
   tempf = NULL;
 
   caliParamLake = NULL;
+  obsSurface[0] = 0;
+  obsSubsurface[0] = 0;
   stdGrid[0] = 0;
   avgGrid[0] = 0;
   scGrid[0] = 0;
@@ -75,6 +77,8 @@ TaskConfigSection::~TaskConfigSection() {}
 char *TaskConfigSection::GetName() { return name; }
 
 char *TaskConfigSection::GetOutput() { return output; }
+char *TaskConfigSection::GetObsSurface() { return obsSurface; }
+char *TaskConfigSection::GetObsSubsurface() { return obsSubsurface; }
 
 char *TaskConfigSection::GetState() { return state; }
 
@@ -390,6 +394,10 @@ CONFIG_SEC_RET TaskConfigSection::ProcessKeyValue(char *name, char *value) {
     }
     paramsInundation = itr->second;
     inundationParamsSet = true;
+  } else if (!strcasecmp(name, "obs_surface")) {
+    strcpy(obsSurface, value);
+  } else if (!strcasecmp(name, "obs_subsurface")) {
+    strcpy(obsSubsurface, value);
   } else if (!strcasecmp(name, "output")) {
     strcpy(output, value);
     outputSet = true;

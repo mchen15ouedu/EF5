@@ -2,6 +2,7 @@
 
 const char *runStyleStrings[] = {
     "simu",       "simu_rp",    "cali_ars",   "cali_dream",
+    "cali_dream_pixel",
     "clip_basin", "clip_gauge", "make_basic", "basin_avg",
 };
 

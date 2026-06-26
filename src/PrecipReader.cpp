@@ -3,6 +3,7 @@
 #include "BifGrid.h"
 #include "MRMSGrid.h"
 #include "Messages.h"
+#include "PqfGrid.h"
 #include "TRMMRTGrid.h"
 #include "TRMMV6Grid.h"
 #include "TifGrid.h"
@@ -41,6 +42,9 @@ bool PrecipReader::Read(char *file, SUPPORTED_PRECIP_TYPES type,
     break;
   case PRECIP_TIF:
     precipGrid = ReadFloatTifGrid(file);
+    break;
+  case PRECIP_PQF:
+    precipGrid = ReadFloatPqfGrid(file);
     break;
   case PRECIP_MRMS:
     precipGrid = ReadFloatMRMSGrid(file);

@@ -45,6 +45,7 @@ static void ExecuteSimulation(TaskConfigSection *task);
 static void ExecuteSimulationRP(TaskConfigSection *task);
 static void ExecuteCalibrationARS(TaskConfigSection *task);
 static void ExecuteCalibrationDREAM(TaskConfigSection *task);
+static void ExecuteCalibrationDREAMPixel(TaskConfigSection *task);
 static void ExecuteCalibrationDREAMEns(EnsTaskConfigSection *task);
 static void ExecuteClipBasin(TaskConfigSection *task);
 static void ExecuteClipGauge(TaskConfigSection *task);
@@ -115,6 +116,9 @@ void ExecuteTasks() {
       break;
     case STYLE_CALI_DREAM:
       ExecuteCalibrationDREAM(task);
+      break;
+    case STYLE_CALI_DREAM_PIXEL:
+      ExecuteCalibrationDREAMPixel(task);
       break;
     case STYLE_CLIP_BASIN:
       ExecuteClipBasin(task);
@@ -246,6 +250,23 @@ void ExecuteCalibrationDREAM(TaskConfigSection *task) {
           modelStrings[task->GetModel()]);
   dream.WriteOutput(buffer, task->GetModel(), task->GetRouting(),
                     task->GetSnow());
+}
+
+// Per-pixel water-balance calibration: no routing, each cell calibrated
+// independently against gridded observed surface/subsurface runoff. Outputs one
+// parameter raster per calibrated CREST/HP parameter.
+void ExecuteCalibrationDREAMPixel(TaskConfigSection *task) {
+
+  Simulator sim;
+  char buffer[CONFIG_MAX_LEN * 2];
+
+  sim.Initialize(task);
+  sprintf(buffer, "%s/%s", task->GetOutput(), "califorcings.bin");
+  sim.PreloadForcings(buffer, true);
+
+  INFO_LOGF("%s", "Precip loaded! Beginning per-pixel calibration.");
+
+  sim.CalibratePerPixel(task);
 }
 
 void ExecuteCalibrationDREAMEns(EnsTaskConfigSection *task) {

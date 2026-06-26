@@ -27,10 +27,13 @@ public:
   bool IsLumped() { return false; }
   const char *GetName() { return "hp"; }
 
-private:
+  // Public point-cell kernel (see CRESTPHYSModel::WaterBalanceInt). Only touches
+  // the passed cNode; safe for concurrent per-pixel calibration.
   void WaterBalanceInt(GridNode *node, HPGridNode *cNode, float stepHours,
                        float precipIn, float petIn, float *fastFlow,
                        float *slowFlow);
+
+private:
   void
   InitializeParameters(std::map<GaugeConfigSection *, float *> *paramSettings,
                        std::vector<FloatGrid *> *paramGrids);

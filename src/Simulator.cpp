@@ -19,6 +19,8 @@
 #include "Messages.h"
 #include "PETConfigSection.h"
 #include "PrecipConfigSection.h"
+#include "PrecipReader.h"
+#include "DatedName.h"
 #include "SAC.h"
 #include "SimpleInundation.h"
 #include "Simulator.h"
@@ -1120,6 +1122,11 @@ void Simulator::SaveTSOutput() {
         fprintf(gaugeOutputs[i], ",%.2f", currentLakeVolume[gauge->GetGridNodeIndex()]);
       }
       fprintf(gaugeOutputs[i], "%s", "\n");
+      // Flush each row to disk so the timeseries CSV (Discharge, Observed,
+      // Precip, ...) can be tailed live while the model is still simulating
+      // (e.g. a website updating a hydrograph). Cost is one flush per timestep
+      // per gauge, negligible vs the model step.
+      fflush(gaugeOutputs[i]);
     }
   }
 }
@@ -2729,7 +2736,7 @@ bool Simulator::HasLakesWithOutputTS() {
   // Check if any lakes have outputts=true
   if (task->IsLakeModuleEnabled() && task->GetBasinSec()->GetLakes()) {
     std::vector<LakeInfo> *lakes = task->GetBasinSec()->GetLakes();
-    
+
     for (size_t i = 0; i < lakes->size(); i++) {
       if (lakes->at(i).outputts) {
         return true;
@@ -2737,4 +2744,277 @@ bool Simulator::HasLakesWithOutputTS() {
     }
   }
   return false;
+}
+
+// ===========================================================================
+// Per-pixel water-balance calibration (STYLE_CALI_DREAM_PIXEL)
+// Each pixel is calibrated independently (no routing couples cells) against its
+// own observed surface (fastFlow) and subsurface (interflow) runoff timeseries.
+// Objective per signal = R^2 * (1 - NRMSE), NRMSE = RMSE/std(obs) clipped to
+// [0,1]; the two signals are averaged. DREAM-family differential evolution
+// (DE/rand/1/bin) finds the best parameter vector per pixel; the fields are
+// stitched into one raster per parameter.
+// ===========================================================================
+namespace {
+
+const float OBS_NODATA = -9999.0f;
+
+// score (to MAXIMIZE) for one signal: R^2 * (1 - NRMSE). Guards near-constant
+// observed series (drops the undefined R^2 term, lets RMSE carry the score).
+static double SignalSkill(const float *sim, const float *obs, int n) {
+  double mo = 0, ms = 0;
+  int m = 0;
+  for (int t = 0; t < n; t++) {
+    if (obs[t] > OBS_NODATA + 1.0f) {
+      mo += obs[t];
+      ms += sim[t];
+      m++;
+    }
+  }
+  if (m < 5) {
+    return 0.0;
+  }
+  mo /= m;
+  ms /= m;
+  double so = 0, ss = 0, cov = 0, sse = 0;
+  for (int t = 0; t < n; t++) {
+    if (obs[t] > OBS_NODATA + 1.0f) {
+      double dobs = obs[t] - mo, dsim = sim[t] - ms;
+      so += dobs * dobs;
+      ss += dsim * dsim;
+      cov += dobs * dsim;
+      sse += (sim[t] - obs[t]) * (sim[t] - obs[t]);
+    }
+  }
+  double stdo = sqrt(so / m);
+  double rmse = sqrt(sse / m);
+  // R^2 term: squared Pearson correlation. If obs ~ constant -> drop (=1).
+  double r2;
+  if (so <= 1e-12) {
+    r2 = 1.0;
+  } else if (ss <= 1e-12) {
+    r2 = 0.0; // sim constant but obs varies -> no pattern match
+  } else {
+    double r = cov / sqrt(so * ss);
+    r2 = r * r;
+  }
+  // Normalized RMSE: by std(obs); fall back to |mean| then to raw if both ~0.
+  double denom = (stdo > 1e-9) ? stdo
+                 : (fabs(mo) > 1e-9 ? fabs(mo) : 1.0);
+  double nrmse = rmse / denom;
+  if (nrmse < 0.0) nrmse = 0.0;
+  if (nrmse > 1.0) nrmse = 1.0;
+  return r2 * (1.0 - nrmse);
+}
+
+// Tiny per-pixel RNG (xorshift64*) so each pixel is reproducible & thread-safe.
+struct PixelRng {
+  unsigned long long s;
+  explicit PixelRng(unsigned long long seed)
+      : s(seed ? seed : 88172645463325252ULL) {}
+  double next() {
+    s ^= s << 13;
+    s ^= s >> 7;
+    s ^= s << 17;
+    return (double)(s >> 11) * (1.0 / 9007199254740992.0);
+  }
+};
+
+// DE/rand/1/bin (greedy) over d params in [lo,hi]; ~budget cost evaluations.
+// Returns best score; writes best params into best[]. cost: const float* -> double.
+template <typename CostFn>
+static double DEOptimize(int d, const float *lo, const float *hi, CostFn cost,
+                         float *best, unsigned long long seed, int budget) {
+  PixelRng rng(seed);
+  int NP = d * 8;
+  if (NP < 16) NP = 16;
+  if (NP > 40) NP = 40;
+  int gens = budget / NP;
+  if (gens < 5) gens = 5;
+  std::vector<std::vector<float> > pop(NP, std::vector<float>(d));
+  std::vector<double> fit(NP);
+  for (int i = 0; i < NP; i++) {
+    for (int j = 0; j < d; j++) {
+      pop[i][j] = lo[j] + (float)rng.next() * (hi[j] - lo[j]);
+    }
+    fit[i] = cost(pop[i].data());
+  }
+  int bi = 0;
+  for (int i = 1; i < NP; i++)
+    if (fit[i] > fit[bi]) bi = i;
+  std::vector<float> trial(d);
+  const double F = 0.6, CR = 0.9;
+  for (int g = 0; g < gens; g++) {
+    for (int i = 0; i < NP; i++) {
+      int a, b, c;
+      do { a = (int)(rng.next() * NP); } while (a == i);
+      do { b = (int)(rng.next() * NP); } while (b == i || b == a);
+      do { c = (int)(rng.next() * NP); } while (c == i || c == a || c == b);
+      int R = (int)(rng.next() * d);
+      for (int j = 0; j < d; j++) {
+        if (rng.next() < CR || j == R) {
+          float v = pop[a][j] + (float)F * (pop[b][j] - pop[c][j]);
+          if (v < lo[j]) v = lo[j];
+          if (v > hi[j]) v = hi[j];
+          trial[j] = v;
+        } else {
+          trial[j] = pop[i][j];
+        }
+      }
+      double ft = cost(trial.data());
+      if (ft >= fit[i]) {
+        pop[i] = trial;
+        fit[i] = ft;
+        if (ft > fit[bi]) bi = i;
+      }
+    }
+  }
+  for (int j = 0; j < d; j++) best[j] = pop[bi][j];
+  return fit[bi];
+}
+
+} // namespace
+
+bool Simulator::LoadObsField(const char *pattern,
+                             std::vector<std::vector<float> > &field) {
+  DatedName dn;
+  dn.SetNameStr((char *)pattern);
+  dn.ProcessNameLoose(NULL);
+  SUPPORTED_PRECIP_TYPES type = PRECIP_TIF;
+  const char *ext = strrchr(pattern, '.');
+  if (ext) {
+    if (!strcasecmp(ext, ".bif")) type = PRECIP_BIF;
+    else if (!strcasecmp(ext, ".pqf")) type = PRECIP_PQF;
+  }
+  PrecipReader reader;
+  field.resize(totalTimeSteps);
+  // Alignment: currentPrecipCali[idx] holds the forcing for model time
+  // beginTime+(idx+1)*step, but EF5 labels each gridded-output raster with the
+  // PREVIOUS step's timestamp (the runoff file is written before the output
+  // timestamp is advanced). So the obs raster matching currentPrecipCali[idx]
+  // is the one labeled beginTime+idx*step. We therefore read starting at
+  // beginTime (idx 0; usually absent -> warmup step, skipped).
+  TimeVar t = beginTime;
+  int idx = 0;
+  for (; idx < (int)totalTimeSteps; t.Increment(timeStep)) {
+    dn.UpdateName(t.GetTM());
+    char buf[CONFIG_MAX_LEN * 2];
+    strcpy(buf, dn.GetName());
+    field[idx].assign(nodes.size(), OBS_NODATA);
+    if (!reader.Read(buf, type, &nodes, &field[idx], 1.0f, NULL, false)) {
+      // missing obs raster: Read fills zeros; mark as nodata so it is skipped
+      field[idx].assign(nodes.size(), OBS_NODATA);
+      WARNING_LOGF("Missing observed runoff raster %s (skipping that step)", buf);
+    }
+    idx++;
+  }
+  return true;
+}
+
+bool Simulator::CalibratePerPixel(TaskConfigSection *task) {
+  char *surfPat = task->GetObsSurface();
+  char *subPat = task->GetObsSubsurface();
+  if (!surfPat[0] || !subPat[0]) {
+    ERROR_LOGF("%s", "STYLE_CALI_DREAM_PIXEL requires OBS_SURFACE and "
+                     "OBS_SUBSURFACE path patterns in the [Task] section.");
+    return false;
+  }
+  MODELS model = task->GetModel();
+  CRESTPHYSModel *cm = dynamic_cast<CRESTPHYSModel *>(wbModel);
+  HPModel *hm = dynamic_cast<HPModel *>(wbModel);
+  if (!cm && !hm) {
+    ERROR_LOGF("%s", "Per-pixel calibration supports MODEL=CRESTPHYS or MODEL=HP.");
+    return false;
+  }
+
+  const int nSteps = (int)totalTimeSteps;
+  const int warmSteps = (int)(totalTimeSteps - totalTimeStepsOutsideWarm);
+  const int evalN = nSteps - warmSteps;
+  const size_t nNodes = nodes.size();
+  const int d = numWBParams;
+  const float *lo = caliParamSec->GetParamMins();
+  const float *hi = caliParamSec->GetParamMaxs();
+  int ndraw = caliParamSec->DREAMGetNDraw();
+  if (ndraw < 200) ndraw = 200;
+  const float stepHours = (float)timeStepHours;
+
+  INFO_LOGF("Per-pixel calibration: %d params, %zu pixels, %d steps (%d eval), "
+            "budget %d evals/pixel",
+            d, nNodes, nSteps, evalN, ndraw);
+
+  // Load gridded observations into [step][node].
+  std::vector<std::vector<float> > obsSurf, obsSub;
+  LoadObsField(surfPat, obsSurf);
+  LoadObsField(subPat, obsSub);
+
+  std::vector<std::vector<float> > paramField(d, std::vector<float>(nNodes, 0.0f));
+
+  long done = 0;
+#pragma omp parallel for schedule(dynamic, 16)
+  for (size_t i = 0; i < nNodes; i++) {
+    std::vector<float> precip(nSteps), pet(nSteps);
+    std::vector<float> os(nSteps), ob(nSteps), sims(nSteps), simb(nSteps);
+    for (int t = 0; t < nSteps; t++) {
+      precip[t] = currentPrecipCali[t][i];
+      pet[t] = currentPETCali[t][i];
+      os[t] = obsSurf[t][i];
+      ob[t] = obsSub[t][i];
+    }
+    // cost(cand) -> averaged R^2*(1-NRMSE) of surface & subsurface (maximize)
+    CRESTPHYSGridNode cn;
+    HPGridNode hn;
+    auto cost = [&](const float *cand) -> double {
+      if (cm) {
+        memset(&cn, 0, sizeof(cn));
+        for (int p = 0; p < PARAM_CRESTPHYS_QTY; p++) cn.params[p] = cand[p];
+        cn.params[PARAM_CRESTPHYS_IM] /= 100.0f;
+        if (cn.params[PARAM_CRESTPHYS_WM] < 1e-3f) cn.params[PARAM_CRESTPHYS_WM] = 1e-3f;
+        if (cn.params[PARAM_CRESTPHYS_HMAXAQ] < 1e-3f) cn.params[PARAM_CRESTPHYS_HMAXAQ] = 1e-3f;
+        cn.states[STATE_CRESTPHYS_SM] =
+            cand[PARAM_CRESTPHYS_IWU] * cn.params[PARAM_CRESTPHYS_WM] / 100.0f;
+        cn.states[STATE_CRESTPHYS_GW] =
+            cand[PARAM_CRESTPHYS_IGW] * cn.params[PARAM_CRESTPHYS_HMAXAQ] / 100.0f;
+        for (int t = 0; t < nSteps; t++) {
+          float f = 0, in = 0, b = 0;
+          cm->WaterBalanceInt(NULL, &cn, stepHours, precip[t], pet[t], &f, &in, &b);
+          sims[t] = f * 3600.0f;
+          simb[t] = in * 3600.0f;
+        }
+      } else {
+        memset(&hn, 0, sizeof(hn));
+        for (int p = 0; p < PARAM_HP_QTY; p++) hn.params[p] = cand[p];
+        for (int t = 0; t < nSteps; t++) {
+          float f = 0, sl = 0;
+          hm->WaterBalanceInt(NULL, &hn, stepHours, precip[t], pet[t], &f, &sl);
+          sims[t] = f * 3600.0f;
+          simb[t] = sl * 3600.0f;
+        }
+      }
+      double a = SignalSkill(&sims[warmSteps], &os[warmSteps], evalN);
+      double b = SignalSkill(&simb[warmSteps], &ob[warmSteps], evalN);
+      return 0.5 * (a + b);
+    };
+
+    float best[PARAM_CRESTPHYS_QTY > 8 ? PARAM_CRESTPHYS_QTY : 8];
+    DEOptimize(d, lo, hi, cost, best,
+               (unsigned long long)(i + 1) * 2654435761ULL, ndraw);
+    for (int p = 0; p < d; p++) paramField[p][i] = best[p];
+
+#pragma omp atomic
+    done++;
+    if ((done & 4095) == 0) {
+      NORMAL_LOGF(" per-pixel cali: %ld/%zu pixels", done, nNodes);
+    }
+  }
+
+  // Stitch each calibrated parameter into a raster (skip fixed params lo==hi).
+  gridWriter.Initialize(); // allocate the full-grid scratch buffer (g_DEM extent)
+  char buf[CONFIG_MAX_LEN * 2];
+  for (int p = 0; p < d; p++) {
+    if (hi[p] <= lo[p]) continue;
+    sprintf(buf, "%s/%s.tif", task->GetOutput(), modelParamStrings[model][p]);
+    gridWriter.WriteGrid(&nodes, &paramField[p], buf, false);
+    INFO_LOGF("Wrote per-pixel parameter raster %s", buf);
+  }
+  return true;
 }

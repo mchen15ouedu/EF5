@@ -22,6 +22,7 @@ enum RUNSTYLE {
   STYLE_SIMU_RP,
   STYLE_CALI_ARS,
   STYLE_CALI_DREAM,
+  STYLE_CALI_DREAM_PIXEL,
   STYLE_CLIP_BASIN,
   STYLE_CLIP_GAUGE,
   STYLE_MAKE_BASIC,
@@ -215,6 +216,7 @@ extern const char **lakeParamGridStrings[];
 extern const int numLakeParams[];
 
 #define IsCalibrationRunStyle(style)                                           \
-  ((style) == STYLE_CALI_ARS || (style) == STYLE_CALI_DREAM)
+  ((style) == STYLE_CALI_ARS || (style) == STYLE_CALI_DREAM ||                 \
+   (style) == STYLE_CALI_DREAM_PIXEL)
 
 #endif

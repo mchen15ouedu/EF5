@@ -2,6 +2,7 @@
 #include "AscGrid.h"
 #include "BifGrid.h"
 #include "Messages.h"
+#include "PqfGrid.h"
 #include "TifGrid.h"
 #include <cmath>
 #include <cstdio>
@@ -34,6 +35,9 @@ bool PETReader::Read(char *file, SUPPORTED_PET_TYPES type,
     break;
   case PET_TIF:
     petGrid = ReadFloatTifGrid(file);
+    break;
+  case PET_PQF:
+    petGrid = ReadFloatPqfGrid(file);
     break;
   default:
     ERROR_LOG("Unsupported PET format!");

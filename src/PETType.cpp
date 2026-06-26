@@ -5,6 +5,7 @@ const char *petTypeStrings[] = {
     "asc",
     "bif",
     "tif",
+    "pqf",
 };
 
 SUPPORTED_PET_TYPES PETType::GetType() { return type; }
@@ -24,4 +25,4 @@ SUPPORTED_PET_TYPES PETType::ParseType(char *typeStr) {
   return result;
 }
 
-const char *PETType::GetTypes() { return "ASC, BIF, TIF"; }
+const char *PETType::GetTypes() { return "ASC, BIF, TIF, PQF"; }

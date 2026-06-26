@@ -30,6 +30,10 @@ public:
   void Simulate(bool trackPeaks = false);
   float SimulateForCali(float *testParams);
   float *SimulateForCaliTS(float *testParams);
+  // Per-pixel water-balance calibration against gridded surface/subsurface
+  // runoff (STYLE_CALI_DREAM_PIXEL). No routing. Writes one param raster per
+  // calibrated parameter to the task OUTPUT dir.
+  bool CalibratePerPixel(TaskConfigSection *task);
   float *GetObsTS();
   size_t GetNumSteps() { return totalTimeStepsOutsideWarm; }
 
@@ -38,6 +42,10 @@ private:
   bool InitializeSimu(TaskConfigSection *task);
   bool InitializeCali(TaskConfigSection *task);
   bool InitializeGridParams(TaskConfigSection *task);
+  // Load a directory of per-timestep observed-runoff rasters (DatedName path
+  // pattern) into field[timestep][node], aligned to the calibration steps.
+  bool LoadObsField(const char *pattern,
+                    std::vector<std::vector<float> > &field);
 
   void SimulateDistributed(bool trackPeaks);
   void SimulateLumped();
