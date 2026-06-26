@@ -2750,18 +2750,21 @@ bool Simulator::HasLakesWithOutputTS() {
 // Per-pixel water-balance calibration (STYLE_CALI_DREAM_PIXEL)
 // Each pixel is calibrated independently (no routing couples cells) against its
 // own observed surface (fastFlow) and subsurface (interflow) runoff timeseries.
-// Objective per signal = R^2 * (1 - NRMSE), NRMSE = RMSE/std(obs) clipped to
-// [0,1]; the two signals are averaged. DREAM-family differential evolution
-// (DE/rand/1/bin) finds the best parameter vector per pixel; the fields are
-// stitched into one raster per parameter.
+// Objective (cost, minimized) per signal = sqrt((R^2 - 1)^2 + NRMSE^2), with
+// NRMSE = RMSE/std(obs) clipped to [0,1]; the two signals are averaged. DREAM-
+// family differential evolution (DE/rand/1/bin) finds the best parameter vector
+// per pixel; the fields are stitched into one raster per parameter.
 // ===========================================================================
 namespace {
 
 const float OBS_NODATA = -9999.0f;
 
-// score (to MAXIMIZE) for one signal: R^2 * (1 - NRMSE). Guards near-constant
-// observed series (drops the undefined R^2 term, lets RMSE carry the score).
-static double SignalSkill(const float *sim, const float *obs, int n) {
+// cost (to MINIMIZE) for one signal: sqrt((R^2 - 1)^2 + NRMSE^2). This is the
+// Euclidean distance from the ideal point (R^2=1, NRMSE=0); it is 0 at a perfect
+// fit and bounded in [0, sqrt(2)] -- numerically stable. Guards near-constant
+// series: constant obs -> correlation undefined, fall back to NRMSE alone
+// (magnitude only); constant sim with varying obs -> R^2=0 (no pattern match).
+static double SignalCost(const float *sim, const float *obs, int n) {
   double mo = 0, ms = 0;
   int m = 0;
   for (int t = 0; t < n; t++) {
@@ -2772,7 +2775,7 @@ static double SignalSkill(const float *sim, const float *obs, int n) {
     }
   }
   if (m < 5) {
-    return 0.0;
+    return 0.0; // too few valid obs -> uninformative, neutral cost
   }
   mo /= m;
   ms /= m;
@@ -2788,23 +2791,25 @@ static double SignalSkill(const float *sim, const float *obs, int n) {
   }
   double stdo = sqrt(so / m);
   double rmse = sqrt(sse / m);
-  // R^2 term: squared Pearson correlation. If obs ~ constant -> drop (=1).
-  double r2;
-  if (so <= 1e-12) {
-    r2 = 1.0;
-  } else if (ss <= 1e-12) {
-    r2 = 0.0; // sim constant but obs varies -> no pattern match
-  } else {
-    double r = cov / sqrt(so * ss);
-    r2 = r * r;
-  }
   // Normalized RMSE: by std(obs); fall back to |mean| then to raw if both ~0.
   double denom = (stdo > 1e-9) ? stdo
                  : (fabs(mo) > 1e-9 ? fabs(mo) : 1.0);
   double nrmse = rmse / denom;
   if (nrmse < 0.0) nrmse = 0.0;
   if (nrmse > 1.0) nrmse = 1.0;
-  return r2 * (1.0 - nrmse);
+  // R^2 term: squared Pearson correlation.
+  if (so <= 1e-12) {
+    return nrmse; // obs constant -> (R^2-1)^2 term drops, magnitude-only cost
+  }
+  double r2;
+  if (ss <= 1e-12) {
+    r2 = 0.0; // sim constant but obs varies -> no pattern match
+  } else {
+    double r = cov / sqrt(so * ss);
+    r2 = r * r;
+  }
+  double dr = r2 - 1.0; // distance of R^2 from its ideal value of 1
+  return sqrt(dr * dr + nrmse * nrmse);
 }
 
 // Tiny per-pixel RNG (xorshift64*) so each pixel is reproducible & thread-safe.
@@ -2960,7 +2965,7 @@ bool Simulator::CalibratePerPixel(TaskConfigSection *task) {
       os[t] = obsSurf[t][i];
       ob[t] = obsSub[t][i];
     }
-    // cost(cand) -> averaged R^2*(1-NRMSE) of surface & subsurface (maximize)
+    // cost(cand) -> negated mean of surface & subsurface costs (maximize -> min cost)
     CRESTPHYSGridNode cn;
     HPGridNode hn;
     auto cost = [&](const float *cand) -> double {
@@ -2990,9 +2995,11 @@ bool Simulator::CalibratePerPixel(TaskConfigSection *task) {
           simb[t] = sl * 3600.0f;
         }
       }
-      double a = SignalSkill(&sims[warmSteps], &os[warmSteps], evalN);
-      double b = SignalSkill(&simb[warmSteps], &ob[warmSteps], evalN);
-      return 0.5 * (a + b);
+      // Objective: minimize the mean of the surface & subsurface costs. The
+      // optimizer maximizes, so return the negated mean cost.
+      double cs = SignalCost(&sims[warmSteps], &os[warmSteps], evalN);
+      double cb = SignalCost(&simb[warmSteps], &ob[warmSteps], evalN);
+      return -0.5 * (cs + cb);
     };
 
     float best[PARAM_CRESTPHYS_QTY > 8 ? PARAM_CRESTPHYS_QTY : 8];
