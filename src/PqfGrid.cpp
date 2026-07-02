@@ -49,13 +49,16 @@ FloatGrid *ReadFloatPqfGrid(char *file) {
   }
   std::shared_ptr<arrow::io::ReadableFile> infile = infileR.ValueOrDie();
 
-  std::unique_ptr<parquet::arrow::FileReader> reader;
-  arrow::Status st = parquet::arrow::OpenFile(
-      infile, arrow::default_memory_pool(), &reader);
-  if (!st.ok()) {
+  // Result-returning OpenFile (Arrow >= 10); the (infile, pool, &reader)
+  // overload was removed in newer Arrow releases.
+  arrow::Result<std::unique_ptr<parquet::arrow::FileReader>> readerR =
+      parquet::arrow::OpenFile(infile, arrow::default_memory_pool());
+  if (!readerR.ok()) {
     WARNING_LOGF("PQF file %s could not be opened as Parquet", file);
     return NULL;
   }
+  std::unique_ptr<parquet::arrow::FileReader> reader =
+      std::move(readerR).ValueOrDie();
 
   // Geometry from key/value metadata.
   std::shared_ptr<parquet::FileMetaData> md = reader->parquet_reader()->metadata();
@@ -73,7 +76,7 @@ FloatGrid *ReadFloatPqfGrid(char *file) {
 
   // Read the single data column.
   std::shared_ptr<arrow::Table> table;
-  st = reader->ReadTable(&table);
+  arrow::Status st = reader->ReadTable(&table);
   if (!st.ok() || table->num_columns() < 1) {
     WARNING_LOGF("PQF file %s: failed to read data column", file);
     return NULL;
