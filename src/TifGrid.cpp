@@ -149,7 +149,7 @@ FloatGrid *ReadFloatTifGrid(const char *file, FloatGrid *incGrid) {
   grid->geoSet = true;
 
   for (long i = 0; i < grid->numRows; i++) {
-    if (TIFFReadScanline(tif, grid->data[i], (unsigned int)i, 1) == -1) {
+    if (TIFFReadScanline(tif, grid->data[i], (unsigned int)i, 0) == -1) {
       for (long j = 0; j < grid->numCols; j++) {
         grid->data[i][j] = grid->noData;
       }
@@ -304,7 +304,7 @@ LongGrid *ReadLongTifGrid(const char *file) {
   grid->data = new long *[grid->numRows];
   for (long i = 0; i < grid->numRows; i++) {
     grid->data[i] = new long[grid->numCols];
-    if (TIFFReadScanline(tif, grid->data[i], (unsigned int)i, 1) == -1) {
+    if (TIFFReadScanline(tif, grid->data[i], (unsigned int)i, 0) == -1) {
       printf("eek!\n");
     }
   }
