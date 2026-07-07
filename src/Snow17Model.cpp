@@ -134,7 +134,9 @@ void Snow17Model::SnowBalanceInt(GridNode *node, Snow17GridNode *cNode,
                                  float tempIn, float *melt, float *swe) {
 
   float stefan = 6.12e-10;
-  float PXTEMP = 1; // Temperature of rainfall (Deg C)
+  // rain/snow partition temperature (Deg C) — a per-node parameter (grid-able
+  // like the other SNOW17 params); was a hardcoded 1 C constant
+  float PXTEMP = cNode->params[PARAM_SNOW17_PXTEMP];
   float TIPM_dtt =
       1.0 - (powf(1.0 - cNode->params[PARAM_SNOW17_TIPM], stepHours / 6));
 
