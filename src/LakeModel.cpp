@@ -127,15 +127,14 @@ bool LakeModelImpl::InitializeModel(std::vector<GridNode> *newNodes,
     
 
     
-    // Fallback: if no location found, use first node (for backward compatibility)
+    // A lake whose cell is not in this basin is not simulated. (It used to
+    // fall back to node 0 - the basin outlet - and regulate the whole basin
+    // with another water body's volume.) lakeNodeIndex stays -1: every lake
+    // method and KWRoute::RegisterLake skip such a lake.
     if (lakeNodeIndex == -1) {
-        lakeNodeIndex = 0;
-        // Using fallback node without logging
-    }
-    
-    if (lakeNodeIndex == -1) {
-        printf("Error: LakeModelImpl::InitializeModel: Could not find grid node for lake %s\n", lakeName.c_str());
-        return false;
+        WARNING_LOGF("Lake %s (%.5f, %.5f): its cell is not in the basin; not simulated.",
+                     lakeName.c_str(), lat, lon);
+        return true;
     }
     
     // Initialize the lake node (single struct -- see header note)
@@ -237,6 +236,42 @@ void LakeModelImpl::InitializeStates(TimeVar *beginTime, char *statePath) {
         cNode->outflow = outflow;
         cNode->states[STATE_LAKE_OUTFLOW] = static_cast<float>(outflow);
         // Using default outflow without logging
+    }
+}
+
+void LakeModelImpl::SaveStatesAll(std::vector<LakeModelImpl *> *lakes, TimeVar *currentTime,
+                                  char *statePath, GridWriterFull *gridWriter,
+                                  std::vector<GridNode> *nodes) {
+    if (!lakes || lakes->empty() || !statePath || !gridWriter || !nodes) return;
+
+    DatedName timeStr;
+    timeStr.SetNameStr("YYYYMMDD_HHUU");
+    timeStr.ProcessNameLoose(NULL);
+    timeStr.UpdateName(currentTime->GetTM());
+
+    // one grid per state variable, every lake's value at its own cell (0
+    // elsewhere, as SaveStates wrote it; InitializeStates reads only the
+    // lake's own cell)
+    std::vector<float> vals[STATE_LAKE_QTY];
+    for (int p = 0; p < STATE_LAKE_QTY; p++) {
+        vals[p].assign(nodes->size(), 0.0f);
+    }
+    for (size_t l = 0; l < lakes->size(); l++) {
+        LakeModelImpl *lake = lakes->at(l);
+        if (!lake || lake->lakeNodeIndex < 0 || lake->lakeNodeIndex >= (int)nodes->size()) {
+            continue;
+        }
+        lake->lakeNode.states[STATE_LAKE_STORAGE] = static_cast<float>(lake->storage);
+        lake->lakeNode.states[STATE_LAKE_OUTFLOW] = static_cast<float>(lake->outflow);
+        for (int p = 0; p < STATE_LAKE_QTY; p++) {
+            vals[p][lake->lakeNodeIndex] = lake->lakeNode.states[p];
+        }
+    }
+    char buffer[300];
+    for (int p = 0; p < STATE_LAKE_QTY; p++) {
+        sprintf(buffer, "%s/lake_%s_%s.tif", statePath,
+                (p == STATE_LAKE_STORAGE) ? "storage" : "outflow", timeStr.GetName());
+        gridWriter->WriteGrid(nodes, &vals[p], buffer, false);
     }
 }
 

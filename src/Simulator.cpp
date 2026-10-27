@@ -1735,14 +1735,10 @@ void Simulator::SimulateDistributed(bool trackPeaks) {
         tempReader.SaveElevCorrState(&currentTime, statePath, &gridWriter, &nodes);
       }
       
-      // Save states for additional lake models
+      // Save states for additional lake models: one grid per state variable
+      // for all lakes (per-lake SaveStates overwrote each other's files)
       if (task->IsLakeModuleEnabled()) {
-        for (size_t l = 0; l < lakeModels.size(); ++l) {
-          LakeModelImpl* lake = lakeModels[l];
-          if (lake) {
-            lake->SaveStates(&currentTime, statePath, &gridWriter);
-          }
-        }
+        LakeModelImpl::SaveStatesAll(&lakeModels, &currentTime, statePath, &gridWriter, &nodes);
       }
     }
 

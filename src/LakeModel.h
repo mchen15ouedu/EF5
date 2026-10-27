@@ -99,6 +99,12 @@ public:
     void InitializeStates(TimeVar *beginTime, char *statePath);
     void SaveStates(TimeVar *currentTime, char *statePath,
                     GridWriterFull *gridWriter);
+    // Save every lake's state into ONE grid per state variable. SaveStates
+    // writes the whole lake_<var>_<time>.tif with only its own cell set, so
+    // with several lakes the last writer won and the others reloaded 0.
+    static void SaveStatesAll(std::vector<LakeModelImpl *> *lakes, TimeVar *currentTime,
+                              char *statePath, GridWriterFull *gridWriter,
+                              std::vector<GridNode> *nodes);
 
     const char *GetName() { return "lake"; }
     bool IsLumped() { return false; } // Lake model is distributed
