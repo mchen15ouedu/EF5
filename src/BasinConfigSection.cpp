@@ -73,7 +73,7 @@ static bool ReadLakesFromCSV(const std::string& filename, std::vector<LakeInfo>&
   }
   
   // Determine column positions (case-insensitive)
-  int nameCol = -1, latCol = -1, lonCol = -1, thVolCol = -1, areaCol = -1, klakeCol = -1, obsFamCol = -1, outputtsCol = -1;
+  int nameCol = -1, latCol = -1, lonCol = -1, thVolCol = -1, areaCol = -1, klakeCol = -1, obsFamCol = -1, outputtsCol = -1, exactCol = -1;
   
   for (size_t i = 0; i < headers.size(); i++) {
     std::string header = headers[i];
@@ -102,6 +102,9 @@ static bool ReadLakesFromCSV(const std::string& filename, std::vector<LakeInfo>&
     }
     else if (header == "outputts" || header == "output_ts" || header == "output_timeseries") {
       outputtsCol = i;
+    }
+    else if (header == "exact" || header == "exact_location") {
+      exactCol = i;
     }
   }
   
@@ -188,6 +191,16 @@ static bool ReadLakesFromCSV(const std::string& filename, std::vector<LakeInfo>&
       std::string valStr = outputtsStr;
       std::transform(valStr.begin(), valStr.end(), valStr.begin(), ::tolower);
       lake.outputts = (valStr == "y" || valStr == "yes" || valStr == "true" || valStr == "1");
+    }
+
+    // exact: lat/lon is the outlet cell itself (a preprocessed lake list);
+    // without it LakeMap moves the lake to the largest FAM within 50 cells
+    if (exactCol >= 0 && exactCol < (int)values.size()) {
+      std::string v = values[exactCol];
+      v.erase(0, v.find_first_not_of(" \t\r\n"));
+      v.erase(v.find_last_not_of(" \t\r\n") + 1);
+      std::transform(v.begin(), v.end(), v.begin(), ::tolower);
+      lake.exactLocation = (v == "y" || v == "yes" || v == "true" || v == "1");
     }
 
     lakes.push_back(lake);

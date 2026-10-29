@@ -88,7 +88,7 @@ std::string LegacyLakeModel::GetLakeName() const { return lakeName; }
 
 // LakeModelImpl implementation (new state-saving version)
 LakeModelImpl::LakeModelImpl(const LakeInfo& info, bool wm_flag, std::map<std::string, double>* engineeredDischarge)
-    : lakeName(info.name), storage(info.th_volume), area(info.area), outflow(0.0), inflow(0.0), precipitation(0.0), evaporation(0.0), dt(0.0), th_volume(info.th_volume), wm_flag(wm_flag), engineeredDischarge(engineeredDischarge), retentionConstant(info.retention_constant), param_a(info.param_a), param_b(info.param_b), nodes(NULL), lakeNodeIndex(-1), warnedDtResidence(false), lat(info.lat), lon(info.lon), obsFlowAccum(info.obsFlowAccum), obsFlowAccumSet(info.obsFlowAccumSet) {
+    : lakeName(info.name), storage(info.th_volume), area(info.area), outflow(0.0), inflow(0.0), precipitation(0.0), evaporation(0.0), dt(0.0), th_volume(info.th_volume), wm_flag(wm_flag), engineeredDischarge(engineeredDischarge), retentionConstant(info.retention_constant), param_a(info.param_a), param_b(info.param_b), nodes(NULL), lakeNodeIndex(-1), warnedDtResidence(false), lat(info.lat), lon(info.lon), obsFlowAccum(info.obsFlowAccum), obsFlowAccumSet(info.obsFlowAccumSet), exactLocation(info.exactLocation) {
     // Initialize grid location
     gridLoc.x = -1;
     gridLoc.y = -1;
@@ -384,8 +384,9 @@ void LakeModelImpl::ApplyVerticalBalance(float stepHours, std::vector<float>* pr
     this->dt = static_cast<double>(stepHours * 3600.0); // Convert hours to seconds
     
     // Convert precipitation and evaporation from mm to m³
-    double precip_vol = this->precipitation * 1e-3 * area; // mm to m^3
-    double evap_vol = this->evaporation * 1e-3 * area;     // mm to m^3
+    // precip and PET arrive as rates (mm/h, as in CRESTModel::WaterBalanceInt)
+    double precip_vol = this->precipitation * stepHours * 1e-3 * area; // mm to m^3
+    double evap_vol = this->evaporation * stepHours * 1e-3 * area;     // mm to m^3
     
     // Apply vertical balance: storage += P - E
     storage += precip_vol - evap_vol;

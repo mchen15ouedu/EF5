@@ -36,6 +36,9 @@ void LakeMap::FindLakeLocations() {
       WARNING_LOGF("Lake %s is outside the basic grid domain!\n", lake->GetName());
       continue;
     }
+    if (lake->IsExactLocation()) {
+      continue;            // the given cell is the lake's outlet: keep it
+    }
     
     // If lake has observed flow accumulation, search for best FAM match (same as gauges)
     if (lake->HasObsFlowAccum()) {

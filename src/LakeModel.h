@@ -23,12 +23,14 @@ struct LakeInfo {
     double obsFlowAccum; // Observed flow accumulation (optional)
     bool obsFlowAccumSet; // Flag indicating if observed flow accumulation is set
     bool outputts; // Flag indicating if lake volume should be output in gauge files
+    bool exactLocation; // lat/lon is the lake's outlet cell: no FAM search
     double param_a; // Retention time in hours for linear reservoir equation: O = (1/(a*3600)) * S * (S/th_volume)^b
     double param_b; // Parameter b for linear reservoir equation: O = (1/(a*3600)) * S * (S/th_volume)^b
     
     // Default constructor for proper initialization
     LakeInfo() : lat(0.0), lon(0.0), th_volume(0.0), area(0.0), 
                  retention_constant(24.0), obsFlowAccum(0.0), obsFlowAccumSet(false), outputts(false),
+                 exactLocation(false),
                  param_a(0.0), param_b(1.5) {} // Default b = 1.5
     
     // Calculate parameter b based on th_volume (input value in km³)
@@ -122,6 +124,7 @@ public:
     double GetLon() const { return lon; }
     GridLoc* GetLocation() { return &gridLoc; }
     bool HasObsFlowAccum() const { return obsFlowAccumSet; }
+    bool IsExactLocation() const { return exactLocation; }
     double GetObsFlowAccum() const { return obsFlowAccum; }
     void SetObsFlowAccum(double value) { obsFlowAccum = value; obsFlowAccumSet = true; }
 
@@ -182,6 +185,7 @@ public:
     double lon;
     double obsFlowAccum;
     bool obsFlowAccumSet;
+    bool exactLocation;
     GridLoc gridLoc;
 };
 
