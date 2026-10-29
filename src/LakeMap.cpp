@@ -34,6 +34,10 @@ void LakeMap::FindLakeLocations() {
     // Convert lat/lon to grid coordinates using same logic as gauge location finding
     if (!g_FAM->GetGridLoc(lake->GetLon(), lake->GetLat(), loc)) {
       WARNING_LOGF("Lake %s is outside the basic grid domain!\n", lake->GetName());
+      // GetGridLoc has already written the clamped edge cell; clear it so
+      // InitializeModel finds no node and the lake is not simulated.
+      loc->x = -1;
+      loc->y = -1;
       continue;
     }
     if (lake->IsExactLocation()) {
@@ -254,6 +258,9 @@ void LakeMap::FindUpstreamNeighbors() {
     GridLoc *loc = lake->GetLocation();
     std::vector<GridLoc> &neighbors = lakeNeighbors[i];
     neighbors.clear();
+    if (loc->x < 0 || loc->y < 0) {
+      continue;            // lake outside the grid (FindLakeLocations): no cell
+    }
     
     // Check 8 neighboring cells for flow direction
     for (int dy = -1; dy <= 1; dy++) {

@@ -435,19 +435,22 @@ void LakeModelImpl::ApplyHorizontalBalance(float stepHours, std::vector<float>* 
 // Core reservoir step shared by the legacy post-routing path and the in-router
 // (KWRoute) coupling. Updates storage from a channel inflow rate (m^3/s) and
 // returns the regulated outflow (m^3/s). Mass is conserved: inflow is added to
-// storage, outflow removed (overflow spills the excess above th_volume).
+// storage, outflow removed (overflow spills the excess above th_volume), and the
+// outflow never exceeds the water the lake holds.
 double LakeModelImpl::StepReservoirInflow(double inflowCMS, double dtSeconds, TimeVar* currentTime) {
     this->inflow = inflowCMS;
     this->dt = dtSeconds;
 
     // Warn (once) if the timestep is larger than the lake's residence time.
-    // We deliberately do NOT cap the outflow -- capping would break the water
-    // mass balance. Instead we tell the user their setup may be unstable.
+    // The outflow is then capped at the water in storage (below). Capping is
+    // what conserves mass: an uncapped outflow*dt larger than the storage, with
+    // storage then clamped at 0, released water the lake never held. The cap
+    // still distorts the recession, so the user is told.
     double stepHours = dtSeconds / 3600.0;
     if (!warnedDtResidence && param_a > 0.0 && stepHours > param_a) {
         WARNING_LOGF("Lake %s: timestep (%.4g h) exceeds the lake residence time "
-                     "klake=%.4g h. Outflow may overshoot available storage and "
-                     "degrade the simulation; consider a smaller timestep.",
+                     "klake=%.4g h. Outflow is capped at the stored water, so the "
+                     "lake may drain in one step; consider a smaller timestep.",
                      lakeName.c_str(), stepHours, param_a);
         warnedDtResidence = true;
     }
@@ -462,21 +465,29 @@ double LakeModelImpl::StepReservoirInflow(double inflowCMS, double dtSeconds, Ti
         outflowValue = LakeCalculations::GetEngineeredDischarge(timestamp, wm_flag, engineeredDischarge);
     }
 
+    // Water available to release this step (m^3/s). The K-law and engineered
+    // outflows are capped at it BEFORE subtracting, so storage cannot go
+    // negative and no water leaves that the lake does not hold.
+    double availableCMS = (storage > 0.0) ? storage / this->dt : 0.0;
+
     if (outflowValue == 0.0) {
         if (storage > th_volume) {
             // Overflow: spill the excess above the threshold (no double-removal).
             outflowValue = (storage - th_volume) / this->dt;
             storage = th_volume;
         } else {
-            // Dry season: linear-reservoir outflow, then remove it from storage.
+            // Dry season: linear-reservoir outflow, capped at the water
+            // available, then removed from storage.
             outflowValue = LakeCalculations::CalculateLinearReservoirOutflow(storage, th_volume, param_a, param_b);
+            outflowValue = std::min(outflowValue, availableCMS);
             storage -= outflowValue * this->dt;
-            if (storage < 0) storage = 0;
+            if (storage < 0) storage = 0; // rounding only (outflow is capped)
         }
     } else {
-        // Engineered (dam-controlled) release.
+        // Engineered (dam-controlled) release, capped at the water available.
+        outflowValue = std::min(outflowValue, availableCMS);
         storage -= outflowValue * this->dt;
-        if (storage < 0) storage = 0;
+        if (storage < 0) storage = 0; // rounding only (outflow is capped)
     }
     this->outflow = outflowValue;
 
