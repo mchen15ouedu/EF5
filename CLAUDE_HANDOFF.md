@@ -36,7 +36,7 @@ Linear-reservoir outflow used everywhere: `O = (1/(a·3600)) · S · (S/Vth)^b`,
 | **#1** | `param_a` was never set from the `klake` column → `param_a=0` → `CalculateLinearReservoirOutflow` returned 0 → **dry-season outflow was always zero**. Now `param_a = retention_constant` in the **active** CSV reader and the `[LAKE]`-section path. | [BasinConfigSection.cpp:165](src/BasinConfigSection.cpp), [:316](src/BasinConfigSection.cpp); also legacy [LakeModel.cpp `ReadLakeInfoCSV`](src/LakeModel.cpp) |
 | **#2** | Overflow branch subtracted the spill **twice** (set `storage=th_volume` *and* then `storage -= outflow·dt`) → water destroyed every spill step. Restructured so the trailing subtraction only runs in the dry/engineered branches. | `LakeModel.cpp`: `ApplyHorizontalBalance`, `LakeModelImpl::Step`, `LegacyLakeModel::Step` |
 | **#5** | `CalculateInflow` **averaged** upstream-neighbor discharge; should **sum** (mass conservation). Now sums. | [LakeMap.cpp `CalculateInflow`](src/LakeMap.cpp) |
-| **#7** | If `dt > klake` (timestep > residence time) the explicit outflow can overshoot. Per user decision: **warn once, do NOT cap** (capping breaks mass balance). | `LakeModel.cpp ApplyHorizontalBalance` (uses `warnedDtResidence`) |
+| **#7** | If `dt > klake` (timestep > residence time) the explicit outflow can overshoot. **Superseded 2026-10-30 (PI-approved, with the continuous law below): the outflow is now CAPPED at the stored water (`S/dt`)** — capping is what conserves mass (the old uncapped `outflow·dt > S`, clamped to 0, released water the lake never held). Still warns once. Continuous outlet law (`LakeCalculations::ReleaseAndSpill`, used by `StepReservoirInflow`, `LakeModelImpl::Step`, `LegacyLakeModel::Step`): `Qk = min(Klaw(min(S,V)), S/dt)` (dam: `min(engineered, S/dt)`), then spill `max(S−V,0)/dt` on top — the outlet keeps releasing at full pool, no latch at `V`, `Q(S)` continuous and monotone. | `LakeModel.cpp StepReservoirInflow` (uses `warnedDtResidence`) + `ReleaseAndSpill` |
 | **#9** | Cold-start storage was inconsistent (constructor `th_volume` vs `InitializeStates` `0.8·th_volume`). Unified to `th_volume` (lake at outlet level). mizuRoute likewise prefers restart files and cold-starts near operating level, not empty. | `LakeModel.cpp InitializeStates` |
 | **#10** | Each lake allocated a `lakeNodes` vector **sized to the whole grid** → `O(N_lakes × N_cells)` memory (fatal for global runs). Now a single `LakeGridNode lakeNode;`. | `LakeModel.h` + all `lakeNodes[...]` sites in `LakeModel.cpp` |
 | **#11** | `CalculateInflow` did `O(N_cells)` linear scans per neighbor per lake per timestep. Added a `(y<<32\|x)→node-index` map built once. | `LakeMap.h` (member `nodeIndexByLoc`) + `LakeMap.cpp CalculateInflow` |
@@ -48,7 +48,10 @@ that is not a compile.
 
 **Behavioral expectations once built & run** (good regression checks):
 - A lake with `storage ≤ th_volume` now produces **non-zero** outflow that scales with `klake`.
-- On a spill step, post-step `storage == th_volume` exactly (no extra loss).
+- On a spill step, post-step `storage == th_volume` exactly (no extra loss), and the
+  outflow is `max(Klaw(V), (S−V)/dt)` (`S` = storage after inflow): the release plus the
+  spill of what is left above `V`.
+- A full lake with inflow below its K-law release at `V` draws down (it does not sit at `V`).
 - Lake volume/outflow respond to `klake` changes (previously inert).
 
 ---

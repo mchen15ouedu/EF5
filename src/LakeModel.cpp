@@ -23,7 +23,40 @@ namespace LakeCalculations {
         double a_seconds = param_a * 3600.0; // Convert retention time from hours to seconds
         return (1.0 / a_seconds) * storage * pow(storageRatio, param_b);
     }
-    
+
+    // Continuous outlet law shared by every lake step (PI-approved 2026-10-30).
+    // Called after the step's inflow (and P-E) has been added to storage. The
+    // outlet releases Qk = min(K-law(min(S, V)), S/dt) -- or, for a dam, the
+    // engineered release capped at S/dt -- and whatever still lies above the
+    // threshold V spills on top. So the outlet keeps releasing at full pool
+    // and Q(S) is continuous and monotone (no latch at V); capping at S/dt
+    // means no water leaves that the lake does not hold (mass conserved).
+    // Updates storage and returns the total outflow (m^3/s).
+    double ReleaseAndSpill(double& storage, double th_volume, double param_a,
+                           double param_b, double engineeredCMS, double dt) {
+        if (dt <= 0.0) return 0.0;
+        if (storage < 0.0) storage = 0.0;
+        double availableCMS = storage / dt;
+        double releaseCMS;
+        if (engineeredCMS != 0.0) {
+            // Engineered (dam-controlled) release, capped at the water held.
+            releaseCMS = std::min(engineeredCMS, availableCMS);
+        } else {
+            // K-law outlet, evaluated at no more than full pool.
+            double sk = std::min(storage, th_volume);
+            releaseCMS = std::min(CalculateLinearReservoirOutflow(sk, th_volume, param_a, param_b), availableCMS);
+        }
+        storage -= releaseCMS * dt;
+        if (storage < 0.0) storage = 0.0; // rounding only (release is capped)
+        // Spill whatever is still above the threshold, on top of the release.
+        double spillCMS = 0.0;
+        if (storage > th_volume) {
+            spillCMS = (storage - th_volume) / dt;
+            storage = th_volume;
+        }
+        return releaseCMS + spillCMS;
+    }
+
     double GetEngineeredDischarge(const std::string& timestamp, bool wm_flag, 
                                    std::map<std::string, double>* engineeredDischarge) {
         if (wm_flag && engineeredDischarge) {
@@ -58,26 +91,11 @@ void LegacyLakeModel::Step(const std::string& timestamp, double inflow, double p
     double evap_vol = evaporation * 1e-3 * area;
     storage += (inflow * dt) + precip_vol - evap_vol;
     
-    // Calculate outflow
-    outflow = LakeCalculations::GetEngineeredDischarge(timestamp, wm_flag, engineeredDischarge);
-    if (outflow == 0.0) {
-        if (storage > th_volume) {
-            // Overflow: spill the excess; storage capped at threshold. No second
-            // subtraction (the old code removed the excess twice).
-            outflow = (storage - th_volume) / dt;
-            storage = th_volume;
-        } else {
-            // Dry season: linear-reservoir outflow, then remove it from storage.
-            // Use retentionConstant as param_a and default b=1.5 for LegacyLakeModel
-            outflow = LakeCalculations::CalculateLinearReservoirOutflow(storage, th_volume, retentionConstant, 1.5);
-            storage -= outflow * dt;
-            if (storage < 0) storage = 0;
-        }
-    } else {
-        // Engineered (dam-controlled) release.
-        storage -= outflow * dt;
-        if (storage < 0) storage = 0;
-    }
+    // Outflow: K-law (or engineered) release capped at the stored water, plus
+    // a spill of anything above th_volume (continuous law, ReleaseAndSpill).
+    // Use retentionConstant as param_a and default b=1.5 for LegacyLakeModel
+    double engineered = LakeCalculations::GetEngineeredDischarge(timestamp, wm_flag, engineeredDischarge);
+    outflow = LakeCalculations::ReleaseAndSpill(storage, th_volume, retentionConstant, 1.5, engineered, dt);
     this->outflow = outflow;
 }
 
@@ -331,26 +349,10 @@ void LakeModelImpl::Step(const std::string& timestamp, double inflow, double pre
     double evap_vol = evaporation * 1e-3 * area;
     storage += (inflow * dt) + precip_vol - evap_vol;
     
-    // Calculate outflow
-    outflow = LakeCalculations::GetEngineeredDischarge(timestamp, wm_flag, engineeredDischarge);
-    if (outflow == 0.0) {
-        if (storage > th_volume) {
-            // Overflow: spill the excess. Storage is capped at the threshold and
-            // the excess leaves as outflow -- do NOT subtract outflow*dt again
-            // afterwards (that was the old double-removal mass-balance bug).
-            outflow = (storage - th_volume) / dt;
-            storage = th_volume;
-        } else {
-            // Dry season: linear-reservoir outflow, then remove it from storage.
-            outflow = LakeCalculations::CalculateLinearReservoirOutflow(storage, th_volume, param_a, param_b);
-            storage -= outflow * dt;
-            if (storage < 0) storage = 0;
-        }
-    } else {
-        // Engineered (dam-controlled) release.
-        storage -= outflow * dt;
-        if (storage < 0) storage = 0;
-    }
+    // Outflow: K-law (or engineered) release capped at the stored water, plus
+    // a spill of anything above th_volume (continuous law, ReleaseAndSpill).
+    double engineered = LakeCalculations::GetEngineeredDischarge(timestamp, wm_flag, engineeredDischarge);
+    outflow = LakeCalculations::ReleaseAndSpill(storage, th_volume, param_a, param_b, engineered, dt);
     this->outflow = outflow;
 
     // Update lake node state if available
@@ -465,30 +467,13 @@ double LakeModelImpl::StepReservoirInflow(double inflowCMS, double dtSeconds, Ti
         outflowValue = LakeCalculations::GetEngineeredDischarge(timestamp, wm_flag, engineeredDischarge);
     }
 
-    // Water available to release this step (m^3/s). The K-law and engineered
-    // outflows are capped at it BEFORE subtracting, so storage cannot go
-    // negative and no water leaves that the lake does not hold.
-    double availableCMS = (storage > 0.0) ? storage / this->dt : 0.0;
-
-    if (outflowValue == 0.0) {
-        if (storage > th_volume) {
-            // Overflow: spill the excess above the threshold (no double-removal).
-            outflowValue = (storage - th_volume) / this->dt;
-            storage = th_volume;
-        } else {
-            // Dry season: linear-reservoir outflow, capped at the water
-            // available, then removed from storage.
-            outflowValue = LakeCalculations::CalculateLinearReservoirOutflow(storage, th_volume, param_a, param_b);
-            outflowValue = std::min(outflowValue, availableCMS);
-            storage -= outflowValue * this->dt;
-            if (storage < 0) storage = 0; // rounding only (outflow is capped)
-        }
-    } else {
-        // Engineered (dam-controlled) release, capped at the water available.
-        outflowValue = std::min(outflowValue, availableCMS);
-        storage -= outflowValue * this->dt;
-        if (storage < 0) storage = 0; // rounding only (outflow is capped)
-    }
+    // Continuous outlet law (ReleaseAndSpill): the K-law (or engineered)
+    // release is capped at the stored water BEFORE subtracting, so storage
+    // cannot go negative and no water leaves that the lake does not hold; the
+    // outlet keeps releasing at full pool and anything above th_volume spills
+    // on top, so Q(S) has no latch at th_volume.
+    outflowValue = LakeCalculations::ReleaseAndSpill(storage, th_volume, param_a, param_b,
+                                                     outflowValue, this->dt);
     this->outflow = outflowValue;
 
     if (lakeNodeIndex >= 0) {

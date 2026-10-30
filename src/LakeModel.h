@@ -146,10 +146,10 @@ public:
     void ApplyHorizontalBalance(float stepHours, std::vector<float>* currentQ, std::vector<GridNode>* nodes, TimeVar* currentTime, LakeMap* lakeMap);
 
     // Core reservoir step: given a channel inflow rate (m^3/s) and timestep (s),
-    // update storage and return the regulated outflow (m^3/s). This is the single
-    // place the linear-reservoir / overflow / engineered logic lives; both the
-    // legacy post-routing ApplyHorizontalBalance path and the in-router coupling
-    // (KWRoute) call it so they stay consistent. currentTime may be NULL when
+    // update storage and return the regulated outflow (m^3/s). The outlet law
+    // itself lives in LakeCalculations::ReleaseAndSpill (shared with Step());
+    // both the legacy post-routing ApplyHorizontalBalance path and the in-router
+    // coupling (KWRoute) call this so they stay consistent. currentTime may be NULL when
     // engineered discharge is not used (CSV lakes have wm_flag=false).
     double StepReservoirInflow(double inflowCMS, double dtSeconds, TimeVar* currentTime);
 
@@ -230,7 +230,13 @@ namespace LakeCalculations {
     // Calculate linear reservoir outflow: O = (1/(a*3600)) * S * (S/th_volume)^b
     // where a is retention time in hours, converted to seconds
     double CalculateLinearReservoirOutflow(double storage, double th_volume, double param_a, double param_b);
-    
+
+    // Continuous outlet law used by every lake step: release min(K-law(min(S,V)),
+    // S/dt) (or the engineered release capped at S/dt, if non-zero), then spill
+    // anything still above V. Updates storage; returns total outflow (m^3/s).
+    double ReleaseAndSpill(double& storage, double th_volume, double param_a,
+                           double param_b, double engineeredCMS, double dt);
+
     // Get engineered discharge for a given timestamp
     double GetEngineeredDischarge(const std::string& timestamp, bool wm_flag, 
                                    std::map<std::string, double>* engineeredDischarge);

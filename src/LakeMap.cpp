@@ -276,34 +276,38 @@ void LakeMap::FindUpstreamNeighbors() {
         }
         
         // Check if this neighbor flows into the lake cell
-        // Flow direction is encoded in g_DDM->data[ny][nx]
+        // Flow direction is encoded in g_DDM->data[ny][nx]. EF5 convention
+        // (BasicGrids.cpp GetDownstreamHeight/TestUpstream): NORTH = y-1,
+        // SOUTH = y+1, EAST = x+1, WEST = x-1. The neighbour sits at (dx,dy)
+        // from the lake, so it drains into the lake when its own step is
+        // (-dx,-dy); e.g. a cell flowing EAST must lie WEST of the lake (dx=-1).
         FLOW_DIR neighborFlowDir = (FLOW_DIR)g_DDM->data[ny][nx];
         bool flowsToLake = false;
-        
+
         switch (neighborFlowDir) {
-          case FLOW_NORTH:
+          case FLOW_NORTH:          // step ( 0,-1)
             flowsToLake = (dx == 0 && dy == 1);
             break;
-          case FLOW_NORTHEAST:
-            flowsToLake = (dx == 1 && dy == 1);
+          case FLOW_NORTHEAST:      // step (+1,-1)
+            flowsToLake = (dx == -1 && dy == 1);
             break;
-          case FLOW_EAST:
-            flowsToLake = (dx == 1 && dy == 0);
-            break;
-          case FLOW_SOUTHEAST:
-            flowsToLake = (dx == 1 && dy == -1);
-            break;
-          case FLOW_SOUTH:
-            flowsToLake = (dx == 0 && dy == -1);
-            break;
-          case FLOW_SOUTHWEST:
-            flowsToLake = (dx == -1 && dy == -1);
-            break;
-          case FLOW_WEST:
+          case FLOW_EAST:           // step (+1, 0)
             flowsToLake = (dx == -1 && dy == 0);
             break;
-          case FLOW_NORTHWEST:
-            flowsToLake = (dx == -1 && dy == 1);
+          case FLOW_SOUTHEAST:      // step (+1,+1)
+            flowsToLake = (dx == -1 && dy == -1);
+            break;
+          case FLOW_SOUTH:          // step ( 0,+1)
+            flowsToLake = (dx == 0 && dy == -1);
+            break;
+          case FLOW_SOUTHWEST:      // step (-1,+1)
+            flowsToLake = (dx == 1 && dy == -1);
+            break;
+          case FLOW_WEST:           // step (-1, 0)
+            flowsToLake = (dx == 1 && dy == 0);
+            break;
+          case FLOW_NORTHWEST:      // step (-1,-1)
+            flowsToLake = (dx == 1 && dy == 1);
             break;
           default:
             flowsToLake = false;
